@@ -57,13 +57,15 @@ Editable base-listing text fields only:
 
 ## `images-manifest.json`
 
-Maps local files to Store image resources per locale. Per image: `{localPath, imageType, description, storeId (when Uploaded), sha256}`.
+Maps local files to Store image resources per locale. Per image: `{localPath, imageType, description, storeId (when Uploaded), sha256, remoteOnly, delete}`. `remoteOnly` and `delete` are omitted when false.
 
 - `pull` writes/refreshes it from the server. Existing server images get their `storeId`; entries with no matching local file are marked `remote-only` (binaries are not downloadable via the API).
 - **Matching rule**: `localPath` is relative to `images/` and locale-prefixed (`en-us/screenshot-01.png`); at upload time it is also the ZIP-internal `fileName`, which is how the Store identifies the file. Confirmed convention: Microsoft's msstore-cli bundles listing images the same way (`{locale}/{filename}` inside Upload.zip, with `image.fileName` set to that relative path). Images originally uploaded through the Partner Center UI have arbitrary server-side `fileName`s → they stay `remote-only` and can only be replaced (delete + upload), not updated in place.
 - `push` computes the diff:
   - Local file with no matching store entry → `fileStatus: PendingUpload`; the file goes into the upload ZIP under its locale-prefixed name.
-  - Store entry (including `remote-only`) with no local file → `fileStatus: PendingDelete` — but see the locale-removal and empty-dir guards in [04-commands.md](04-commands.md).
+  - Retained `remote-only` entry → keep the Store image `Uploaded` and unchanged. A server image absent from the manifest is also retained as a safety measure, so a missing or damaged manifest cannot mass-delete screenshots.
+  - Managed manifest entry whose local file is missing → validation error before creating a submission.
+  - Entry with `delete: true` and a `storeId` → `fileStatus: PendingDelete`. Deletion is always explicit; `delete` is mutually exclusive with `remoteOnly` and does not require a local file.
   - Matched entries (same `localPath`, same `sha256` as recorded) → left `Uploaded`, untouched. A changed `sha256` = replace (delete + upload).
   - **Caption-only change** (edited `description` on a matched entry): keep `fileStatus: Uploaded` and send the new `description` in the PUT body alongside the image `id`. Include in the V2 live verification that the API accepts description edits on `Uploaded` images; if it doesn't, fall back to replace (delete + upload).
 - Image order in the listing = display order in the Store; use filename sort within each locale directory.

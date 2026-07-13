@@ -3,6 +3,7 @@ package metadata_test
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -90,6 +91,38 @@ func TestWriteSnapshotRejectsCaseInsensitiveDuplicateLocales(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "duplicates locale") {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestWriteSnapshotRemovesStaleListingFiles(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	listingsDir := filepath.Join(dir, "listings")
+	if err := os.MkdirAll(listingsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(listingsDir, "stale.json"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(listingsDir, "notes.txt"), []byte("keep\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := metadata.WriteSnapshot(dir, metadata.Snapshot{
+		Marker: metadata.StoreMarker{AppID: "APP"},
+		Listings: map[string]metadata.Listing{
+			"en-US": {Title: "Title"},
+		},
+		Images: metadata.ImageManifest{Images: map[string][]metadata.ImageEntry{}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(listingsDir, "stale.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stale listing still exists: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(listingsDir, "notes.txt")); err != nil {
+		t.Fatalf("non-listing file was removed: %v", err)
 	}
 }
 

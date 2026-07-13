@@ -48,9 +48,9 @@ Acceptance:
 
 ## M4 — `listing pull` / `listing push`
 
-- [ ] `internal/metadata`: dir read/write, `store.json` identity marker, listing file schema + client-side limits, images manifest, sha256 diffing, case-insensitive locale handling
-- [ ] Resolve the `remote-only` no-op contradiction: doc 05 says `pull` marks server images without downloadable binaries as `remote-only` and `push` marks server entries (including `remote-only`) with no local file `PendingDelete`, while M4 acceptance requires an immediate `pull` → `push --dry-run` to report no changes. Decide whether a retained `remote-only` manifest entry is the explicit keep signal.
-- [ ] `listing pull` (published/pending source, `remote-only` image entries)
+- [x] `internal/metadata`: dir read/write, `store.json` identity marker, listing file schema + client-side limits, images manifest, sha256 diffing, case-insensitive locale handling
+- [x] Resolve the `remote-only` no-op contradiction. Plan decision (2026-07-14): retained `remoteOnly` and unmentioned server entries are kept unchanged; a missing managed local file is an error; only an explicit `delete: true` entry with `storeId` becomes `PendingDelete`.
+- [x] `listing pull` (published/pending source, `remote-only` image entries)
 - [ ] `listing push`: mode enforcement (`--dry-run | --skip-commit | --yes`), identity guard, text application, image add/replace/delete + ZIP upload, locale add, `--allow-locale-removal` guard, `--release-notes`, `--dry-run` diff output
 - [ ] V1: verify locale add/remove via update PUT with a live `--skip-commit` draft; document result
 - [ ] Encode confirmed image limits (PNG only, ≤50 MB, desktop ≥1366×768, ≤10 desktop / ≤8 other per locale, caption ≤200 chars — doc 05); V2 residual: confirm the API enforces the same limits on first live push

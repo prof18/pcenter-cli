@@ -29,6 +29,15 @@ func ValidateImages(metadataDir string, manifest ImageManifest) error {
 			if utf8.RuneCountInString(entry.Description) > 200 {
 				return fmt.Errorf("image manifest %q entry %d description exceeds 200 characters", locale, index)
 			}
+			if entry.Delete {
+				if strings.TrimSpace(entry.StoreID) == "" {
+					return fmt.Errorf("image manifest %q entry %d delete requires storeId", locale, index)
+				}
+				if entry.RemoteOnly {
+					return fmt.Errorf("image manifest %q entry %d delete and remoteOnly are mutually exclusive", locale, index)
+				}
+				continue
+			}
 			if isScreenshotType(entry.ImageType) {
 				hasScreenshot = true
 				counts[entry.ImageType]++

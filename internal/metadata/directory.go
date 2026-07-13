@@ -50,6 +50,7 @@ type ImageEntry struct {
 	StoreID     string `json:"storeId,omitempty"`
 	SHA256      string `json:"sha256,omitempty"`
 	RemoteOnly  bool   `json:"remoteOnly,omitempty"`
+	Delete      bool   `json:"delete,omitempty"`
 }
 
 // Snapshot is the complete on-disk metadata representation.
@@ -102,11 +103,35 @@ func WriteSnapshot(dir string, snapshot Snapshot) error {
 			return err
 		}
 	}
+	if err := removeStaleListingFiles(filepath.Join(dir, "listings"), canonical); err != nil {
+		return err
+	}
 	if snapshot.Images.Images == nil {
 		snapshot.Images.Images = map[string][]ImageEntry{}
 	}
 	if err := writeJSON(filepath.Join(dir, manifestFileName), snapshot.Images); err != nil {
 		return err
+	}
+	return nil
+}
+
+func removeStaleListingFiles(listingsDir string, current map[string]Listing) error {
+	entries, err := os.ReadDir(listingsDir)
+	if err != nil {
+		return fmt.Errorf("read listings directory: %w", err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.EqualFold(filepath.Ext(entry.Name()), ".json") {
+			continue
+		}
+		locale := strings.ToLower(strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name())))
+		if _, exists := current[locale]; exists {
+			continue
+		}
+		path := filepath.Join(listingsDir, entry.Name())
+		if err := os.Remove(path); err != nil {
+			return fmt.Errorf("remove stale listing %s: %w", path, err)
+		}
 	}
 	return nil
 }

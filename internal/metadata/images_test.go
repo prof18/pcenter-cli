@@ -84,6 +84,14 @@ func TestValidateImagesRejectsInvalidFilesAndMetadata(t *testing.T) {
 			},
 			wantErr: "50 MB",
 		},
+		{
+			name: "delete without store id", entry: metadata.ImageEntry{ImageType: "Screenshot", Delete: true},
+			prepare: func(*testing.T, string) {}, wantErr: "delete requires storeId",
+		},
+		{
+			name: "delete remote only", entry: metadata.ImageEntry{ImageType: "Screenshot", StoreID: "id", RemoteOnly: true, Delete: true},
+			prepare: func(*testing.T, string) {}, wantErr: "mutually exclusive",
+		},
 	}
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {

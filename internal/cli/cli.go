@@ -19,6 +19,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/prof18/pcenter-cli/internal/config"
+	metadataflow "github.com/prof18/pcenter-cli/internal/metadata"
 	"github.com/prof18/pcenter-cli/internal/output"
 	"github.com/prof18/pcenter-cli/internal/store"
 	storetypes "github.com/prof18/pcenter-cli/internal/store/types"
@@ -126,8 +127,95 @@ func (s *commandState) rootCommand() *cobra.Command {
 		s.submissionCommand(),
 		s.rolloutCommand(),
 		s.publishCommand(),
+		s.listingCommand(),
 	)
 	return root
+}
+
+func (s *commandState) listingCommand() *cobra.Command {
+	parent := &cobra.Command{Use: "listing", Short: "Manage Store listing metadata"}
+	parent.AddCommand(s.listingPullCommand())
+	return parent
+}
+
+func (s *commandState) listingPullCommand() *cobra.Command {
+	var dir string
+	var published, pending bool
+	command := &cobra.Command{
+		Use:   "pull",
+		Short: "Snapshot Store listing metadata into a directory",
+		Args:  noArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if strings.TrimSpace(dir) == "" {
+				return usageError{errors.New("listing pull requires --dir")}
+			}
+			if err := s.prepareOutput(); err != nil {
+				return err
+			}
+			if err := s.prepareClient(); err != nil {
+				return err
+			}
+			app, err := s.client.Application(cmd.Context(), s.config.AppID)
+			if err != nil {
+				return failureError{err}
+			}
+			var reference *storetypes.SubmissionReference
+			source := "published"
+			if pending {
+				reference = app.PendingApplicationSubmission
+				source = "pending"
+			} else {
+				reference = app.LastPublishedApplicationSubmission
+			}
+			if reference == nil {
+				return failureError{fmt.Errorf("application has no %s submission", source)}
+			}
+			submission, err := s.client.Submission(cmd.Context(), s.config.AppID, reference.ID)
+			if err != nil {
+				return failureError{err}
+			}
+			build := normalizeBuildInfo(s.dependencies.Build)
+			snapshot, _, err := metadataflow.SnapshotFromSubmission(dir, s.config.AppID, "pcenter "+build.Version, s.dependencies.Now(), submission.Raw)
+			if err != nil {
+				return failureError{err}
+			}
+			if err := metadataflow.WriteSnapshot(dir, snapshot); err != nil {
+				return failureError{err}
+			}
+			remoteOnly := 0
+			matchedLocal := 0
+			for _, entries := range snapshot.Images.Images {
+				for _, entry := range entries {
+					if entry.RemoteOnly {
+						remoteOnly++
+					} else {
+						matchedLocal++
+					}
+				}
+			}
+			result := struct {
+				Directory          string `json:"directory"`
+				Source             string `json:"source"`
+				SubmissionID       string `json:"submissionId"`
+				ListingCount       int    `json:"listingCount"`
+				RemoteOnlyImages   int    `json:"remoteOnlyImages"`
+				MatchedLocalImages int    `json:"matchedLocalImages"`
+			}{dir, source, reference.ID, len(snapshot.Listings), remoteOnly, matchedLocal}
+			renderer := output.NewRenderer(s.dependencies.Stdout, s.format)
+			if s.format == output.JSON {
+				return wrapFailure(renderer.Value(result))
+			}
+			return wrapFailure(renderer.Rows(
+				[]string{"DIRECTORY", "SOURCE", "SUBMISSION", "LISTINGS", "REMOTE-ONLY IMAGES", "MATCHED LOCAL IMAGES"},
+				[][]string{{result.Directory, result.Source, result.SubmissionID, strconv.Itoa(result.ListingCount), strconv.Itoa(result.RemoteOnlyImages), strconv.Itoa(result.MatchedLocalImages)}},
+			))
+		},
+	}
+	command.Flags().StringVar(&dir, "dir", "", "metadata directory")
+	command.Flags().BoolVar(&published, "published", false, "pull the last published submission (default)")
+	command.Flags().BoolVar(&pending, "pending", false, "pull the pending submission")
+	command.MarkFlagsMutuallyExclusive("published", "pending")
+	return command
 }
 
 func (s *commandState) versionCommand(build BuildInfo) *cobra.Command {
