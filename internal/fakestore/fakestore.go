@@ -60,16 +60,33 @@ type Response struct {
 	Body   string
 }
 
+// MutationScenario scripts failures for a state-changing endpoint.
+// ApplyOnFailure models the gateway returning an error after the operation succeeded.
+type MutationScenario struct {
+	Failures       int
+	Status         int
+	ApplyOnFailure bool
+}
+
 // Options defines initial fake state and scripted failures.
 type Options struct {
-	AppID       string
-	App         App
-	Submissions map[string]json.RawMessage
-	Rollouts    map[string]Rollout
-	ReviewPages []ReviewPage
-	Failures    []Failure
-	Responses   []Response
-	AccessToken string
+	AppID               string
+	App                 App
+	Submissions         map[string]json.RawMessage
+	Rollouts            map[string]Rollout
+	ReviewPages         []ReviewPage
+	Failures            []Failure
+	Responses           []Response
+	AccessToken         string
+	CreateSubmissionID  string
+	CreateSubmission    json.RawMessage
+	CommitStatuses      []string
+	CommitStatusDetails json.RawMessage
+	StatusQueues        map[string][]string
+	FinalizeScenario    MutationScenario
+	CreateScenario      MutationScenario
+	CommitScenario      MutationScenario
+	DeleteScenario      MutationScenario
 }
 
 // Request is a sanitized journal entry. It records presence, never credential values.
@@ -85,11 +102,19 @@ type Request struct {
 
 // Server is an httptest implementation of the Partner Center surface used by pcenter.
 type Server struct {
-	mu       sync.Mutex
-	server   *httptest.Server
-	options  Options
-	failures []Failure
-	journal  []Request
+	mu          sync.Mutex
+	server      *httptest.Server
+	options     Options
+	failures    []Failure
+	journal     []Request
+	app         App
+	submissions map[string]json.RawMessage
+	rollouts    map[string]Rollout
+	statusQueue map[string][]string
+	finalize    MutationScenario
+	create      MutationScenario
+	commit      MutationScenario
+	deleteDraft MutationScenario
 }
 
 // New starts a fake Store server and registers cleanup with t.
@@ -98,7 +123,18 @@ func New(t testing.TB, options Options) *Server {
 	if options.AccessToken == "" {
 		options.AccessToken = "fake-access-token"
 	}
-	s := &Server{options: options, failures: append([]Failure(nil), options.Failures...)}
+	s := &Server{
+		options:     options,
+		failures:    append([]Failure(nil), options.Failures...),
+		app:         options.App,
+		submissions: cloneRawMessages(options.Submissions),
+		rollouts:    cloneRollouts(options.Rollouts),
+		statusQueue: cloneStatusQueues(options.StatusQueues),
+		finalize:    options.FinalizeScenario,
+		create:      options.CreateScenario,
+		commit:      options.CommitScenario,
+		deleteDraft: options.DeleteScenario,
+	}
 	s.server = httptest.NewServer(http.HandlerFunc(s.handle))
 	t.Cleanup(s.server.Close)
 	return s
@@ -119,6 +155,20 @@ func (s *Server) Journal() []Request {
 	return result
 }
 
+// SetFailures replaces the remaining generic failure script.
+func (s *Server) SetFailures(failures []Failure) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.failures = append([]Failure(nil), failures...)
+}
+
+// SetStatusQueue scripts status endpoint responses for an existing submission.
+func (s *Server) SetStatusQueue(submissionID string, statuses []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.statusQueue[submissionID] = append([]string(nil), statuses...)
+}
+
 func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
 	s.record(r, body)
@@ -130,7 +180,16 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/oauth2/token"):
 		writeJSON(w, http.StatusOK, map[string]any{"access_token": s.options.AccessToken, "token_type": "Bearer", "expires_in": 3600})
 	case r.Method == http.MethodGet && r.URL.Path == "/v1.0/my/applications/"+s.options.AppID:
-		writeJSON(w, http.StatusOK, s.options.App)
+		s.mu.Lock()
+		app := s.app
+		s.mu.Unlock()
+		writeJSON(w, http.StatusOK, app)
+	case r.Method == http.MethodPost && r.URL.Path == "/v1.0/my/applications/"+s.options.AppID+"/submissions":
+		s.handleCreate(w)
+	case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/v1.0/my/applications/"+s.options.AppID+"/submissions/"):
+		s.handleDelete(w, r)
+	case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/v1.0/my/applications/"+s.options.AppID+"/submissions/"):
+		s.handleSubmissionPOST(w, r)
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1.0/my/applications/"+s.options.AppID+"/submissions/"):
 		s.handleSubmissionGET(w, r)
 	case r.Method == http.MethodGet && r.URL.Path == "/v1.0/my/analytics/reviews":
@@ -207,7 +266,9 @@ func (s *Server) handleSubmissionGET(w http.ResponseWriter, r *http.Request) {
 	remainder := strings.TrimPrefix(r.URL.Path, prefix)
 	if strings.HasSuffix(remainder, "/packagerollout") {
 		id := strings.TrimSuffix(remainder, "/packagerollout")
-		rollout, ok := s.options.Rollouts[id]
+		s.mu.Lock()
+		rollout, ok := s.rollouts[id]
+		s.mu.Unlock()
 		if !ok {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "rollout not found"})
 			return
@@ -215,7 +276,13 @@ func (s *Server) handleSubmissionGET(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, rollout)
 		return
 	}
-	submission, ok := s.options.Submissions[remainder]
+	if strings.HasSuffix(remainder, "/status") {
+		s.handleSubmissionStatus(w, strings.TrimSuffix(remainder, "/status"))
+		return
+	}
+	s.mu.Lock()
+	submission, ok := s.submissions[remainder]
+	s.mu.Unlock()
 	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "submission not found"})
 		return
@@ -223,6 +290,255 @@ func (s *Server) handleSubmissionGET(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(submission)
+}
+
+func (s *Server) handleSubmissionStatus(w http.ResponseWriter, id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	raw, ok := s.submissions[id]
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "submission not found"})
+		return
+	}
+	status := submissionStatus(raw)
+	if queue := s.statusQueue[id]; len(queue) > 0 {
+		status = queue[0]
+		if len(queue) > 1 {
+			s.statusQueue[id] = queue[1:]
+		}
+	}
+	details := s.options.CommitStatusDetails
+	if len(details) == 0 {
+		details = json.RawMessage(`{}`)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": status, "statusDetails": details})
+}
+
+func (s *Server) handleCreate(w http.ResponseWriter) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.app.PendingApplicationSubmission != nil {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "pending submission exists"})
+		return
+	}
+	apply := func() {
+		id := s.options.CreateSubmissionID
+		if id == "" {
+			id = "created"
+		}
+		raw := append(json.RawMessage(nil), s.options.CreateSubmission...)
+		if len(raw) == 0 {
+			raw = json.RawMessage(fmt.Sprintf(`{"id":%q,"status":"PendingCommit","listings":{}}`, id))
+		}
+		s.submissions[id] = raw
+		s.app.PendingApplicationSubmission = &SubmissionRef{ID: id, Status: "PendingCommit"}
+	}
+	if status, failed := applyScenario(&s.create, apply); failed {
+		writeMutationFailure(w, status)
+		return
+	}
+	apply()
+	id := s.app.PendingApplicationSubmission.ID
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(s.submissions[id])
+}
+
+func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
+	prefix := "/v1.0/my/applications/" + s.options.AppID + "/submissions/"
+	id := strings.TrimPrefix(r.URL.Path, prefix)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.app.PendingApplicationSubmission == nil || s.app.PendingApplicationSubmission.ID != id {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "draft not found"})
+		return
+	}
+	apply := func() {
+		delete(s.submissions, id)
+		delete(s.statusQueue, id)
+		s.app.PendingApplicationSubmission = nil
+	}
+	if status, failed := applyScenario(&s.deleteDraft, apply); failed {
+		writeMutationFailure(w, status)
+		return
+	}
+	apply()
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleSubmissionPOST(w http.ResponseWriter, r *http.Request) {
+	prefix := "/v1.0/my/applications/" + s.options.AppID + "/submissions/"
+	remainder := strings.TrimPrefix(r.URL.Path, prefix)
+	operationIndex := strings.LastIndexByte(remainder, '/')
+	if operationIndex < 0 {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "operation not found"})
+		return
+	}
+	id, operation := remainder[:operationIndex], remainder[operationIndex+1:]
+	switch operation {
+	case "finalizepackagerollout":
+		s.handleFinalize(w, id)
+	case "commit":
+		s.handleCommit(w, id)
+	case "updatepackagerolloutpercentage":
+		s.handleSetPercentage(w, r, id)
+	case "haltpackagerollout":
+		s.handleHalt(w, id)
+	default:
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "operation not found"})
+	}
+}
+
+func (s *Server) handleFinalize(w http.ResponseWriter, id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rollout, ok := s.rollouts[id]
+	if !ok || rollout.PackageRolloutStatus != "PackageRolloutInProgress" {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "rollout is not in progress"})
+		return
+	}
+	apply := func() {
+		rollout.IsPackageRollout = false
+		rollout.PackageRolloutPercentage = 100
+		rollout.PackageRolloutStatus = "PackageRolloutCompleted"
+		s.rollouts[id] = rollout
+	}
+	if status, failed := applyScenario(&s.finalize, apply); failed {
+		writeMutationFailure(w, status)
+		return
+	}
+	apply()
+	writeJSON(w, http.StatusOK, s.rollouts[id])
+}
+
+func (s *Server) handleCommit(w http.ResponseWriter, id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	raw, ok := s.submissions[id]
+	if !ok || submissionStatus(raw) != "PendingCommit" {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "submission is not pending commit"})
+		return
+	}
+	apply := func() {
+		statuses := append([]string(nil), s.options.CommitStatuses...)
+		if len(statuses) == 0 {
+			statuses = []string{"CommitStarted"}
+		}
+		s.statusQueue[id] = statuses
+		s.submissions[id] = withSubmissionStatus(raw, statuses[0])
+		if s.app.PendingApplicationSubmission != nil && s.app.PendingApplicationSubmission.ID == id {
+			s.app.PendingApplicationSubmission.Status = statuses[0]
+		}
+	}
+	if status, failed := applyScenario(&s.commit, apply); failed {
+		writeMutationFailure(w, status)
+		return
+	}
+	apply()
+	writeJSON(w, http.StatusOK, map[string]string{"status": firstStatus(s.options.CommitStatuses)})
+}
+
+func (s *Server) handleSetPercentage(w http.ResponseWriter, r *http.Request, id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rollout, ok := s.rollouts[id]
+	if !ok || rollout.PackageRolloutStatus != "PackageRolloutInProgress" {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "rollout is not in progress"})
+		return
+	}
+	percentage, err := strconv.ParseFloat(r.URL.Query().Get("percentage"), 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid percentage"})
+		return
+	}
+	rollout.PackageRolloutPercentage = percentage
+	s.rollouts[id] = rollout
+	writeJSON(w, http.StatusOK, rollout)
+}
+
+func (s *Server) handleHalt(w http.ResponseWriter, id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rollout, ok := s.rollouts[id]
+	if !ok || rollout.PackageRolloutStatus != "PackageRolloutInProgress" {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "rollout is not in progress"})
+		return
+	}
+	rollout.PackageRolloutPercentage = 0
+	rollout.PackageRolloutStatus = "PackageRolloutStopped"
+	s.rollouts[id] = rollout
+	writeJSON(w, http.StatusOK, rollout)
+}
+
+func applyScenario(scenario *MutationScenario, apply func()) (int, bool) {
+	if scenario.Failures <= 0 {
+		return 0, false
+	}
+	scenario.Failures--
+	if scenario.ApplyOnFailure {
+		apply()
+	}
+	status := scenario.Status
+	if status == 0 {
+		status = http.StatusGatewayTimeout
+	}
+	return status, true
+}
+
+func writeMutationFailure(w http.ResponseWriter, status int) {
+	writeJSON(w, status, map[string]string{"error": "injected mutation failure"})
+}
+
+func submissionStatus(raw json.RawMessage) string {
+	var value struct {
+		Status string `json:"status"`
+	}
+	_ = json.Unmarshal(raw, &value)
+	return value.Status
+}
+
+func withSubmissionStatus(raw json.RawMessage, status string) json.RawMessage {
+	var value map[string]any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return raw
+	}
+	value["status"] = status
+	updated, err := json.Marshal(value)
+	if err != nil {
+		return raw
+	}
+	return updated
+}
+
+func firstStatus(statuses []string) string {
+	if len(statuses) == 0 {
+		return "CommitStarted"
+	}
+	return statuses[0]
+}
+
+func cloneRawMessages(source map[string]json.RawMessage) map[string]json.RawMessage {
+	result := make(map[string]json.RawMessage, len(source))
+	for key, value := range source {
+		result[key] = append(json.RawMessage(nil), value...)
+	}
+	return result
+}
+
+func cloneRollouts(source map[string]Rollout) map[string]Rollout {
+	result := make(map[string]Rollout, len(source))
+	for key, value := range source {
+		result[key] = value
+	}
+	return result
+}
+
+func cloneStatusQueues(source map[string][]string) map[string][]string {
+	result := make(map[string][]string, len(source))
+	for key, value := range source {
+		result[key] = append([]string(nil), value...)
+	}
+	return result
 }
 
 func (s *Server) handleReviews(w http.ResponseWriter, r *http.Request) {

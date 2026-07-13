@@ -3,12 +3,13 @@ package cli
 
 import (
 	"context"
-	"crypto/rand"
+	cryptorand "crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	mathrand "math/rand/v2"
 	"net/http"
 	"sort"
 	"strconv"
@@ -21,6 +22,7 @@ import (
 	"github.com/prof18/pcenter-cli/internal/output"
 	"github.com/prof18/pcenter-cli/internal/store"
 	storetypes "github.com/prof18/pcenter-cli/internal/store/types"
+	submissionflow "github.com/prof18/pcenter-cli/internal/submission"
 )
 
 // BuildInfo is injected through linker flags in release builds.
@@ -39,6 +41,8 @@ type Dependencies struct {
 	Now         func() time.Time
 	Build       BuildInfo
 	HTTPClient  *http.Client
+	Clock       store.Clock
+	Rand        store.Rand
 }
 
 type commandState struct {
@@ -49,6 +53,7 @@ type commandState struct {
 	verbose      bool
 	format       output.Format
 	client       *store.Client
+	manager      *submissionflow.Manager
 	config       config.Config
 }
 
@@ -68,6 +73,12 @@ func Execute(ctx context.Context, args []string, dependencies Dependencies) int 
 	}
 	if dependencies.HTTPClient == nil {
 		dependencies.HTTPClient = http.DefaultClient
+	}
+	if dependencies.Clock == nil {
+		dependencies.Clock = commandClock{}
+	}
+	if dependencies.Rand == nil {
+		dependencies.Rand = commandRand{}
 	}
 	state := &commandState{dependencies: dependencies}
 	root := state.rootCommand()
@@ -212,7 +223,10 @@ func (s *commandState) localesCommand() *cobra.Command {
 
 func (s *commandState) submissionCommand() *cobra.Command {
 	parent := &cobra.Command{Use: "submission", Short: "Inspect submissions"}
-	parent.AddCommand(s.submissionStatusCommand(), s.submissionGetCommand())
+	parent.AddCommand(
+		s.submissionStatusCommand(), s.submissionGetCommand(), s.submissionDeleteCommand(),
+		s.submissionCommitCommand(), s.submissionWatchCommand(),
+	)
 	return parent
 }
 
@@ -277,6 +291,120 @@ func (s *commandState) submissionGetCommand() *cobra.Command {
 	return command
 }
 
+func (s *commandState) submissionDeleteCommand() *cobra.Command {
+	var yes bool
+	command := &cobra.Command{
+		Use:   "delete-draft",
+		Short: "Delete the pending draft after verifying its state",
+		Args:  noArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if !yes {
+				return usageError{errors.New("submission delete-draft requires --yes")}
+			}
+			app, err := s.loadApplication(cmd.Context())
+			if err != nil {
+				return err
+			}
+			pending := app.PendingApplicationSubmission
+			if pending == nil {
+				return failureError{errors.New("application has no pending submission")}
+			}
+			status := pending.Status
+			if status == "" {
+				submission, getErr := s.client.Submission(cmd.Context(), s.config.AppID, pending.ID)
+				if getErr != nil {
+					return failureError{getErr}
+				}
+				status = submission.Status
+			}
+			if status != "PendingCommit" {
+				return failureError{fmt.Errorf("refusing to delete submission %s in status %s; only PendingCommit drafts can be deleted", pending.ID, status)}
+			}
+			if err := s.prepareManager(); err != nil {
+				return err
+			}
+			if err := s.manager.DeleteDraft(cmd.Context(), s.config.AppID, pending.ID); err != nil {
+				return failureError{err}
+			}
+			renderer := output.NewRenderer(s.dependencies.Stdout, s.format)
+			if s.format == output.JSON {
+				return wrapFailure(renderer.Value(map[string]string{"deletedSubmissionId": pending.ID}))
+			}
+			return wrapFailure(renderer.Rows([]string{"DELETED SUBMISSION"}, [][]string{{pending.ID}}))
+		},
+	}
+	command.Flags().BoolVar(&yes, "yes", false, "confirm deletion of the pending draft")
+	return command
+}
+
+func (s *commandState) submissionCommitCommand() *cobra.Command {
+	var id string
+	var pollSeconds, pollAttempts int
+	command := &cobra.Command{
+		Use:   "commit",
+		Short: "Commit a prepared draft",
+		Args:  noArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			submissionID, err := s.resolveSubmissionID(cmd.Context(), id, false)
+			if err != nil {
+				return err
+			}
+			poll, err := pollOptions(pollSeconds, pollAttempts)
+			if err != nil {
+				return usageError{err}
+			}
+			if err := s.prepareManager(); err != nil {
+				return err
+			}
+			result, err := s.manager.Commit(cmd.Context(), s.config.AppID, submissionID, poll)
+			if err != nil {
+				return failureError{err}
+			}
+			return s.renderCommitResult(result)
+		},
+	}
+	command.Flags().StringVar(&id, "id", "", "submission id; defaults to pending")
+	command.Flags().IntVar(&pollSeconds, "poll-seconds", 30, "seconds between status polls")
+	command.Flags().IntVar(&pollAttempts, "poll-attempts", 20, "maximum status polls")
+	return command
+}
+
+func (s *commandState) submissionWatchCommand() *cobra.Command {
+	var id string
+	var pollSeconds, pollAttempts int
+	command := &cobra.Command{
+		Use:   "watch",
+		Short: "Watch a submission until it reaches a terminal status",
+		Args:  noArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			submissionID, err := s.resolveSubmissionID(cmd.Context(), id, false)
+			if err != nil {
+				return err
+			}
+			poll, err := pollOptions(pollSeconds, pollAttempts)
+			if err != nil {
+				return usageError{err}
+			}
+			if err := s.prepareManager(); err != nil {
+				return err
+			}
+			result, err := s.manager.Watch(cmd.Context(), s.config.AppID, submissionID, poll)
+			if err != nil {
+				return failureError{err}
+			}
+			renderer := output.NewRenderer(s.dependencies.Stdout, s.format)
+			if s.format == output.JSON {
+				return wrapFailure(renderer.Value(result))
+			}
+			return wrapFailure(renderer.Rows([]string{"STATUS", "CLASSIFICATION", "DETAILS"}, [][]string{{result.Status, string(result.Classification), string(result.StatusDetails)}}))
+		},
+	}
+	command.Flags().StringVar(&id, "id", "", "submission id; defaults to pending")
+	command.Flags().IntVar(&pollSeconds, "poll-seconds", 30, "seconds between status polls")
+	command.Flags().IntVar(&pollAttempts, "poll-attempts", 20, "maximum status polls")
+	return command
+}
+
 func (s *commandState) rolloutCommand() *cobra.Command {
 	parent := &cobra.Command{Use: "rollout", Short: "Inspect package rollouts"}
 	parent.AddCommand(&cobra.Command{
@@ -304,8 +432,98 @@ func (s *commandState) rolloutCommand() *cobra.Command {
 				[][]string{{rollout.PackageRolloutStatus, strconv.FormatFloat(rollout.PackageRolloutPercentage, 'f', -1, 64), rollout.FallbackSubmissionID}},
 			))
 		},
-	})
+	}, s.rolloutFinalizeCommand(), s.rolloutSetPercentageCommand(), s.rolloutHaltCommand())
 	return parent
+}
+
+func (s *commandState) rolloutFinalizeCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "finalize",
+		Short: "Finalize the last published package rollout",
+		Args:  noArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			submissionID, err := s.resolvePublishedSubmissionID(cmd.Context())
+			if err != nil {
+				return err
+			}
+			if err := s.prepareManager(); err != nil {
+				return err
+			}
+			rollout, err := s.manager.FinalizeRollout(cmd.Context(), s.config.AppID, submissionID)
+			if err != nil {
+				return failureError{err}
+			}
+			return s.renderRollout(rollout)
+		},
+	}
+}
+
+func (s *commandState) rolloutSetPercentageCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "set-percentage <n>",
+		Short: "Set the last published rollout percentage",
+		Args: func(_ *cobra.Command, args []string) error {
+			if len(args) != 1 {
+				return usageError{errors.New("set-percentage requires exactly one percentage")}
+			}
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			percentage, err := strconv.ParseFloat(args[0], 64)
+			if err != nil || percentage <= 0 || percentage > 100 {
+				return usageError{errors.New("percentage must be a number greater than 0 and at most 100")}
+			}
+			submissionID, err := s.resolvePublishedSubmissionID(cmd.Context())
+			if err != nil {
+				return err
+			}
+			if err := s.prepareManager(); err != nil {
+				return err
+			}
+			rollout, err := s.manager.SetRolloutPercentage(cmd.Context(), s.config.AppID, submissionID, percentage)
+			if err != nil {
+				return failureError{err}
+			}
+			return s.renderRollout(rollout)
+		},
+	}
+}
+
+func (s *commandState) rolloutHaltCommand() *cobra.Command {
+	var yes bool
+	command := &cobra.Command{
+		Use:   "halt",
+		Short: "Halt the last published package rollout",
+		Args:  noArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if !yes {
+				return usageError{errors.New("rollout halt requires --yes")}
+			}
+			submissionID, err := s.resolvePublishedSubmissionID(cmd.Context())
+			if err != nil {
+				return err
+			}
+			if err := s.prepareManager(); err != nil {
+				return err
+			}
+			rollout, err := s.manager.HaltRollout(cmd.Context(), s.config.AppID, submissionID)
+			if err != nil {
+				return failureError{err}
+			}
+			note := "the next submission will clone the halted submission, not the fallback"
+			renderer := output.NewRenderer(s.dependencies.Stdout, s.format)
+			if s.format == output.JSON {
+				return wrapFailure(renderer.Value(map[string]any{"rollout": rollout, "note": note}))
+			}
+			if err := renderer.Rows([]string{"STATUS", "PERCENTAGE", "FALLBACK SUBMISSION"}, [][]string{{rollout.PackageRolloutStatus, strconv.FormatFloat(rollout.PackageRolloutPercentage, 'f', -1, 64), rollout.FallbackSubmissionID}}); err != nil {
+				return failureError{err}
+			}
+			_, err = fmt.Fprintln(s.dependencies.Stdout, "Note:", note)
+			return wrapFailure(err)
+		},
+	}
+	command.Flags().BoolVar(&yes, "yes", false, "confirm halting the rollout")
+	return command
 }
 
 func (s *commandState) reviewsCommand() *cobra.Command {
@@ -400,13 +618,33 @@ func (s *commandState) prepareClient() error {
 	client, err := store.NewClient(store.ClientOptions{
 		APIBase: resolved.APIBase, LoginBase: resolved.LoginBase, TenantID: resolved.TenantID,
 		ClientID: resolved.ClientID, ClientSecret: resolved.ClientSecret,
-		HTTPClient: s.dependencies.HTTPClient, CorrelationID: correlationID, VerboseLog: verboseLog,
+		HTTPClient: s.dependencies.HTTPClient, Clock: s.dependencies.Clock, Rand: s.dependencies.Rand,
+		CorrelationID: correlationID, VerboseLog: verboseLog,
 	})
 	if err != nil {
 		return usageError{err}
 	}
 	s.config = resolved
 	s.client = client
+	return nil
+}
+
+func (s *commandState) prepareManager() error {
+	if s.manager != nil {
+		return nil
+	}
+	if err := s.prepareClient(); err != nil {
+		return err
+	}
+	manager, err := submissionflow.NewManager(submissionflow.ManagerOptions{
+		Client: s.client,
+		Clock:  s.dependencies.Clock,
+		Rand:   s.dependencies.Rand,
+	})
+	if err != nil {
+		return failureError{err}
+	}
+	s.manager = manager
 	return nil
 }
 
@@ -457,6 +695,57 @@ func (s *commandState) renderReviews(rawReviews []json.RawMessage) error {
 	return wrapFailure(renderer.Rows([]string{"DATE", "MARKET", "RATING", "TITLE", "TEXT", "PACKAGE VERSION"}, rows))
 }
 
+func (s *commandState) renderRollout(rollout storetypes.Rollout) error {
+	renderer := output.NewRenderer(s.dependencies.Stdout, s.format)
+	if s.format == output.JSON {
+		return wrapFailure(renderer.Value(rollout))
+	}
+	return wrapFailure(renderer.Rows(
+		[]string{"STATUS", "PERCENTAGE", "FALLBACK SUBMISSION"},
+		[][]string{{rollout.PackageRolloutStatus, strconv.FormatFloat(rollout.PackageRolloutPercentage, 'f', -1, 64), rollout.FallbackSubmissionID}},
+	))
+}
+
+func (s *commandState) renderCommitResult(result submissionflow.CommitResult) error {
+	renderer := output.NewRenderer(s.dependencies.Stdout, s.format)
+	if s.format == output.JSON {
+		return wrapFailure(renderer.Value(result))
+	}
+	if err := renderer.Rows([]string{"STATUS", "DETAILS"}, [][]string{{result.Status, string(result.StatusDetails)}}); err != nil {
+		return failureError{err}
+	}
+	if result.Warning != "" {
+		_, err := fmt.Fprintln(s.dependencies.Stderr, "Warning:", result.Warning)
+		return wrapFailure(err)
+	}
+	return nil
+}
+
+func (s *commandState) resolveSubmissionID(ctx context.Context, explicitID string, published bool) (string, error) {
+	if explicitID != "" {
+		if err := s.prepareClient(); err != nil {
+			return "", err
+		}
+		return explicitID, nil
+	}
+	app, err := s.loadApplication(ctx)
+	if err != nil {
+		return "", err
+	}
+	ref := app.PendingApplicationSubmission
+	if published {
+		ref = app.LastPublishedApplicationSubmission
+	}
+	if ref == nil {
+		return "", failureError{errors.New("requested submission does not exist")}
+	}
+	return ref.ID, nil
+}
+
+func (s *commandState) resolvePublishedSubmissionID(ctx context.Context) (string, error) {
+	return s.resolveSubmissionID(ctx, "", true)
+}
+
 func normalizeBuildInfo(info BuildInfo) BuildInfo {
 	if info.Version == "" {
 		info.Version = "dev"
@@ -481,6 +770,16 @@ func reviewDate(value, fallback string) (string, error) {
 	return parsed.Format("1/2/2006"), nil
 }
 
+func pollOptions(seconds, attempts int) (submissionflow.PollOptions, error) {
+	if seconds < 0 {
+		return submissionflow.PollOptions{}, errors.New("--poll-seconds must be non-negative")
+	}
+	if attempts < 1 {
+		return submissionflow.PollOptions{}, errors.New("--poll-attempts must be positive")
+	}
+	return submissionflow.PollOptions{Interval: time.Duration(seconds) * time.Second, Attempts: attempts}, nil
+}
+
 func composeReviewFilter(rawFilter, market string) string {
 	if market == "" {
 		return rawFilter
@@ -502,7 +801,7 @@ func truncate(value string, maximum int) string {
 
 func newCorrelationID() (string, error) {
 	value := make([]byte, 16)
-	if _, err := rand.Read(value); err != nil {
+	if _, err := cryptorand.Read(value); err != nil {
 		return "", err
 	}
 	value[6] = (value[6] & 0x0f) | 0x40
@@ -536,3 +835,22 @@ func unwrapCommandError(err error) error {
 	}
 	return err
 }
+
+type commandClock struct{}
+
+func (commandClock) Sleep(ctx context.Context, duration time.Duration) error {
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func (commandClock) Now() time.Time { return time.Now() }
+
+type commandRand struct{}
+
+func (commandRand) Float64() float64 { return mathrand.Float64() }

@@ -68,6 +68,7 @@ type APIError struct {
 	StatusCode    int
 	Body          string
 	CorrelationID string
+	RetryAfter    string
 }
 
 func (e *APIError) Error() string {
@@ -128,6 +129,14 @@ func (c *Client) Submission(ctx context.Context, appID, submissionID string) (st
 	}
 	result.Raw = append(json.RawMessage(nil), body...)
 	return result, nil
+}
+
+// SubmissionStatus gets the dedicated submission status resource.
+func (c *Client) SubmissionStatus(ctx context.Context, appID, submissionID string) (storetypes.SubmissionStatus, error) {
+	var result storetypes.SubmissionStatus
+	path := "/applications/" + url.PathEscape(appID) + "/submissions/" + url.PathEscape(submissionID) + "/status"
+	err := c.getJSON(ctx, path, &result)
+	return result, err
 }
 
 // Rollout gets package rollout state.
@@ -244,6 +253,7 @@ func (c *Client) do(ctx context.Context, method, path string, body []byte) ([]by
 		return nil, &APIError{
 			Method: method, URL: c.redactor.Redact(requestURL), StatusCode: statusCode,
 			Body: c.redactor.Redact(string(responseBody)), CorrelationID: c.correlationID,
+			RetryAfter: responseHeader.Get("Retry-After"),
 		}
 	}
 	return nil, errors.New("request attempts exhausted")

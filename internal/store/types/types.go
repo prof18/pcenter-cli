@@ -28,6 +28,12 @@ type Submission struct {
 	Raw           json.RawMessage            `json:"-"`
 }
 
+// SubmissionStatus is returned by the dedicated status endpoint.
+type SubmissionStatus struct {
+	Status        string          `json:"status"`
+	StatusDetails json.RawMessage `json:"statusDetails,omitempty"`
+}
+
 // Rollout is the package rollout state for a published submission.
 type Rollout struct {
 	IsPackageRollout         bool    `json:"isPackageRollout"`

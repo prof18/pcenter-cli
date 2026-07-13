@@ -133,9 +133,20 @@ func execute(t *testing.T, environment config.Environment, args []string, build 
 		IsTTY:       false,
 		Now:         func() time.Time { return time.Date(2026, 7, 13, 12, 0, 0, 0, time.UTC) },
 		Build:       build,
+		Clock:       instantClock{},
+		Rand:        cliFixedRand(1),
 	})
 	return stdout.String(), stderr.String(), exitCode
 }
+
+type instantClock struct{}
+
+func (instantClock) Sleep(context.Context, time.Duration) error { return nil }
+func (instantClock) Now() time.Time                             { return time.Date(2026, 7, 13, 12, 0, 0, 0, time.UTC) }
+
+type cliFixedRand float64
+
+func (r cliFixedRand) Float64() float64 { return float64(r) }
 
 func fullServer(t *testing.T) *fakestore.Server {
 	t.Helper()

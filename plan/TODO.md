@@ -23,14 +23,14 @@ Acceptance:
 
 ## M2 — Submission & rollout mutations
 
-- [ ] Fakestore failure injection: 504-but-succeeded scenarios for finalize/create/commit/delete + genuine-failure variants
-- [ ] Verify loops from [03-store-api-client.md](03-store-api-client.md) with the exponential schedules: finalize, create-with-adoption, commit, delete-verify, post-commit poll
-- [ ] Commands: `rollout finalize`, `rollout set-percentage` (query param, confirmed), `rollout halt --yes` (prints after-state + clone-of-halted warning), `submission delete-draft --yes`, `submission commit`, `submission watch` (full 15-value status taxonomy from doc 03)
-- [ ] 409 from rollout ops mapped to a permanent state error (no retry, actual rollout state in the message)
+- [x] Fakestore failure injection: 504-but-succeeded scenarios for finalize/create/commit/delete + genuine-failure variants
+- [x] Verify loops from [03-store-api-client.md](03-store-api-client.md) with the exponential schedules: finalize, create-with-adoption, commit, delete-verify, post-commit poll
+- [x] Commands: `rollout finalize`, `rollout set-percentage` (query param, confirmed), `rollout halt --yes` (prints after-state + clone-of-halted warning), `submission delete-draft --yes`, `submission commit`, `submission watch` (full 15-value status taxonomy from doc 03)
+- [x] 409 from rollout ops mapped to a permanent state error (no retry, actual rollout state in the message)
 
 Acceptance:
-- [ ] Flow tests cover happy / 504-but-succeeded / genuinely-failed for every loop, plus 401-refresh and 429/Retry-After paths
-- [ ] The 2026-07-08 scenario (rollout stuck at 90%, finalize 504s while state flips) passes via `rollout finalize` against fakestore
+- [x] Flow tests cover happy / 504-but-succeeded / genuinely-failed for every loop, plus 401-refresh and 429/Retry-After paths
+- [x] The 2026-07-08 scenario (rollout stuck at 90%, finalize 504s while state flips) passes via `rollout finalize` against fakestore
 
 ## M3 — `publish msix`
 
