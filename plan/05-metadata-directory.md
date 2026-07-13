@@ -53,7 +53,7 @@ Editable base-listing text fields only:
 - Omit `releaseNotes` — owned by the release-notes JSON contract (`--release-notes` flag).
 - `platformOverrides` are not modeled in files; `push` carries them through from the server unchanged.
 - Field limits to validate client-side before any submission is created: `features` ≤ 20 items, `recommendedHardware`/`minimumHardware` ≤ 11 items.
-- Docs ambiguity: `minimumHardware` is declared type `string` in the API reference table but described as an array. Treat both hardware fields as raw JSON passthrough on pull (write whatever the server returns) and validate leniently on push; confirm the real shape from the first live `pull`.
+- Docs ambiguity: `minimumHardware` is declared type `string` in the API reference table but described as an array. Treat both hardware fields as raw JSON passthrough on pull (write whatever the server returns) and validate leniently on push. Live FeedFlow pull on 2026-07-14 confirmed that both `recommendedHardware` and `minimumHardware` are arrays.
 
 ## `images-manifest.json`
 

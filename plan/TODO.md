@@ -56,12 +56,12 @@ Acceptance:
 - [x] Encode confirmed image limits (PNG only, ≤50 MB, desktop ≥1366×768, ≤10 desktop / ≤8 other per locale, caption ≤200 chars — doc 05)
 - [ ] V2 residual: confirm the API enforces the same image limits on the first live push
 - [x] Hardware fields (`recommendedHardware`/`minimumHardware`): raw passthrough on pull and lenient validation (docs type ambiguity — doc 05)
-- [ ] Confirm the hardware field shape from the first live pull
+- [x] Confirm the hardware field shape from the first live pull: FeedFlow returned arrays for both fields (2026-07-14)
 - [ ] V3: verify a metadata-only submission can carry `packageDeliveryOptions` through unchanged
 
 Acceptance:
-- [ ] `pull` on FeedFlow produces a complete metadata dir; immediate `push --dry-run` reports "no changes"
-- [ ] `push` against a wrong/empty dir fails on the `store.json` guard (test + manual check)
+- [x] `pull` on FeedFlow produces a complete metadata dir; immediate `push --dry-run` reports "no changes" (25 locales, 101 `remoteOnly` images, zero listing/image/upload changes; 2026-07-14)
+- [x] `push` against a wrong/empty dir fails on the `store.json` guard (wrong-app test plus live empty-directory manual check; 2026-07-14)
 - [ ] A text change + screenshot add/remove produces a correct live draft (`--skip-commit`, inspected, then deleted)
 
 ## M5 — Release + feed-flow CI swap
