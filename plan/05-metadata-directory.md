@@ -67,7 +67,7 @@ Maps local files to Store image resources per locale. Per image: `{localPath, im
   - Managed manifest entry whose local file is missing → validation error before creating a submission.
   - Entry with `delete: true` and a `storeId` → `fileStatus: PendingDelete`. Deletion is always explicit; `delete` is mutually exclusive with `remoteOnly` and does not require a local file.
   - Matched entries (same `localPath`, same `sha256` as recorded) → left `Uploaded`, untouched. A changed `sha256` = replace (delete + upload).
-  - **Caption-only change** (edited `description` on a matched entry): keep `fileStatus: Uploaded` and send the new `description` in the PUT body alongside the image `id`. Include in the V2 live verification that the API accepts description edits on `Uploaded` images; if it doesn't, fall back to replace (delete + upload).
+  - **Caption-only change** (edited `description` on a matched entry): keep `fileStatus: Uploaded` and send the new `description` in the PUT body alongside the image `id`. Existing FeedFlow images are all `remoteOnly`, so this cannot be verified without replacing or deleting current listing content. Per maintainer direction on 2026-07-14, defer this check until M5 has a committed CLI-managed image; if the API rejects the in-place edit, fall back to replace (delete + upload).
 - Image order in the listing = display order in the Store; use filename sort within each locale directory.
 
 ## Image validation (client-side, before any submission is created)
@@ -79,8 +79,8 @@ Confirmed against the Learn "screenshots and images" page for MSIX (2026-07-10):
 - Count limits: max **10** desktop screenshots per locale; max **8** per other device family (`MobileScreenshot`, `XboxScreenshot`, ...).
 - Image `description` (caption) max **200 characters**.
 - 1:1 app tile icon (`imageType: Icon`): 300×300 PNG.
-- Residual verify (TODO item V2): confirm the API enforces the same limits (it may be laxer/stricter than the Partner Center UI) when the first live push runs.
+- Live validation on 2026-07-14 accepted two 1920×1080 PNG screenshots as `PendingUpload` in an uncommitted draft. The draft was inspected and deleted; the published 101 images remained untouched.
 
 ## Locale add/remove
 
-A new `listings/<locale>.json` adds that locale key to the submission's `listings` on push; a missing file removes the locale **only** when `--allow-locale-removal` is passed. Adding/removing locales via the update PUT **must be verified against the live API with a `--skip-commit` draft before being documented as supported** (TODO item V1).
+A new `listings/<locale>.json` adds that locale key to the submission's `listings` on push; a missing file removes the locale **only** when `--allow-locale-removal` is passed. A live `--skip-commit` draft on 2026-07-14 verified adding `en-gb`. Per maintainer direction, removal remains deferred because current listing content must not be deleted.

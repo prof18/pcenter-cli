@@ -52,17 +52,17 @@ Acceptance:
 - [x] Resolve the `remote-only` no-op contradiction. Plan decision (2026-07-14): retained `remoteOnly` and unmentioned server entries are kept unchanged; a missing managed local file is an error; only an explicit `delete: true` entry with `storeId` becomes `PendingDelete`.
 - [x] `listing pull` (published/pending source, `remote-only` image entries)
 - [x] `listing push`: mode enforcement (`--dry-run | --skip-commit | --yes`), identity guard, text application, image add/replace/delete + ZIP upload, locale add, `--allow-locale-removal` guard, `--release-notes`, `--dry-run` diff output
-- [ ] V1: verify locale add/remove via update PUT with a live `--skip-commit` draft; document result
+- [x] V1 add: a live `--skip-commit` draft added `en-gb`; API inspection confirmed 26 locales (2026-07-14)
 - [x] Encode confirmed image limits (PNG only, ≤50 MB, desktop ≥1366×768, ≤10 desktop / ≤8 other per locale, caption ≤200 chars — doc 05)
-- [ ] V2 residual: confirm the API enforces the same image limits on the first live push
+- [x] V2 image upload: the live API accepted two 1920×1080 PNG screenshots as `PendingUpload` (2026-07-14)
 - [x] Hardware fields (`recommendedHardware`/`minimumHardware`): raw passthrough on pull and lenient validation (docs type ambiguity — doc 05)
 - [x] Confirm the hardware field shape from the first live pull: FeedFlow returned arrays for both fields (2026-07-14)
-- [ ] V3: verify a metadata-only submission can carry `packageDeliveryOptions` through unchanged
+- [x] V3: metadata-only PUT accepted cloned `packageDeliveryOptions`; both existing packages kept the same IDs/files and remained `Uploaded` (2026-07-14)
 
 Acceptance:
 - [x] `pull` on FeedFlow produces a complete metadata dir; immediate `push --dry-run` reports "no changes" (25 locales, 101 `remoteOnly` images, zero listing/image/upload changes; 2026-07-14)
 - [x] `push` against a wrong/empty dir fails on the `store.json` guard (wrong-app test plus live empty-directory manual check; 2026-07-14)
-- [ ] A text change + screenshot add/remove produces a correct live draft (`--skip-commit`, inspected, then deleted)
+- [x] An additive-only text + screenshot change produced a correct live draft (`--skip-commit`), with 101 existing images still `Uploaded`, two additions `PendingUpload`, and zero `PendingDelete`; the draft was inspected and deleted (2026-07-14)
 
 ## M5 — Release + feed-flow CI swap
 
@@ -74,6 +74,8 @@ Acceptance:
 - [ ] feed-flow: seed metadata dir via `listing pull`, commit ([07-feedflow-integration.md](07-feedflow-integration.md) §1)
 - [ ] feed-flow: swap `windows-release.yml` to pinned `pcenter` (§3)
 - [ ] After first green real release: delete the 3 ps1 scripts + `list-microsoft-store-locales.sh`, update docs/CLAUDE.md (§4–5)
+- [ ] After the first committed CLI-managed image exists, verify caption-only edits on an `Uploaded` image; fall back to replace if the API rejects them
+- [ ] Verify locale removal only when the maintainer explicitly authorizes deleting a Store listing locale
 
 Acceptance:
 - [ ] One real FeedFlow release published end-to-end through `pcenter` in CI
@@ -81,9 +83,9 @@ Acceptance:
 
 ## Verify against the live API (referenced above)
 
-- **V1** Locale add/remove via update PUT (M4)
-- **V2** Screenshot limits: docs-confirmed values are encoded client-side; confirm the API enforces the same on the first live push, and that caption (`description`) edits on `Uploaded` images are accepted in place (M4)
-- **V3** Metadata-only submission: `packageDeliveryOptions` carried through unchanged (M4)
+- **V1** Locale add via update PUT verified in M4; removal deferred to M5 by maintainer safety direction
+- **V2** Screenshot upload limits verified in M4; caption edit deferred until a CLI-managed image is committed in M5
+- **V3** Metadata-only submission accepted cloned `packageDeliveryOptions` in M4
 
 Resolved during planning (2026-07-09/10, against Learn docs):
 - ~~Reviews paging~~ → `@nextLink` + `TotalCount`; `top` default/max 10000.
