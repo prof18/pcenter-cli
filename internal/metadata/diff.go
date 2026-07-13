@@ -181,6 +181,9 @@ func diffLocaleImages(metadataDir, locale string, manifest []ImageEntry, server 
 		return imageFileName(pendingUploads[left]) < imageFileName(pendingUploads[right])
 	})
 	updates = append(updates, pendingUploads...)
+	sort.SliceStable(updates, func(left, right int) bool {
+		return imageFileName(updates[left]) < imageFileName(updates[right])
+	})
 	return updates, uploads, changes, nil
 }
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -73,6 +74,29 @@ func TestCompiledBinaryReviewsAllAndUsageExit(t *testing.T) {
 	}
 }
 
+func TestCompiledBinaryListingPullThenDryRun(t *testing.T) {
+	t.Parallel()
+	server := e2eServer(t)
+	environment := serverEnvironment(server)
+	dir := t.TempDir()
+
+	stdout, stderr, exitCode := run(t, environment, "--output", "json", "listing", "pull", "--dir", dir)
+	if exitCode != 0 || stderr != "" || !strings.Contains(stdout, `"listingCount":1`) {
+		t.Fatalf("pull stdout=%q stderr=%q exit=%d", stdout, stderr, exitCode)
+	}
+	stdout, stderr, exitCode = run(t, environment, "--output", "json", "listing", "push", "--dir", dir, "--dry-run")
+	if exitCode != 0 || stderr != "" || !strings.Contains(stdout, `"hasChanges":false`) || !strings.Contains(stdout, `"body"`) {
+		t.Fatalf("dry-run stdout=%q stderr=%q exit=%d", stdout, stderr, exitCode)
+	}
+	for _, request := range server.Journal() {
+		isStoreMutation := strings.HasPrefix(request.Path, "/v1.0/my/") &&
+			(request.Method == http.MethodPost || request.Method == http.MethodPut || request.Method == http.MethodDelete)
+		if isStoreMutation {
+			t.Fatalf("pull/dry-run mutated Store: %+v", request)
+		}
+	}
+}
+
 func run(t *testing.T, environment []string, args ...string) (string, string, int) {
 	t.Helper()
 	command := exec.CommandContext(context.Background(), binaryPath, args...)
@@ -102,7 +126,13 @@ func e2eServer(t *testing.T) *fakestore.Server {
 			LastPublishedApplicationSubmission: &fakestore.SubmissionRef{ID: "published", Status: "Published"},
 		},
 		Submissions: map[string]json.RawMessage{
-			"published": json.RawMessage(`{"id":"published","status":"Published","listings":{"en-us":{}}}`),
+			"published": json.RawMessage(`{
+				"id":"published","status":"Published","targetPublishMode":"Immediate",
+				"applicationPackages":[{"fileName":"app.msix","fileStatus":"Uploaded","version":"1.0.0.0"}],
+				"packageDeliveryOptions":{"isMandatoryUpdate":false,"packageRollout":{"isPackageRollout":true,"packageRolloutPercentage":90}},
+				"listings":{"en-us":{"baseListing":{"title":"Title","description":"Description","features":[],"keywords":[],
+				"recommendedHardware":[],"minimumHardware":[],"images":[{"fileName":"legacy.png","fileStatus":"Uploaded","id":"image","imageType":"Screenshot"}]}}}
+			}`),
 		},
 		Rollouts: map[string]fakestore.Rollout{
 			"published": {IsPackageRollout: true, PackageRolloutPercentage: 90, PackageRolloutStatus: "PackageRolloutInProgress", FallbackSubmissionID: "fallback"},

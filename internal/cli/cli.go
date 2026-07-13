@@ -11,6 +11,7 @@ import (
 	"io"
 	mathrand "math/rand/v2"
 	"net/http"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -56,6 +57,7 @@ type commandState struct {
 	client       *store.Client
 	manager      *submissionflow.Manager
 	publisher    *submissionflow.Publisher
+	listingPush  *submissionflow.ListingPublisher
 	config       config.Config
 }
 
@@ -134,7 +136,7 @@ func (s *commandState) rootCommand() *cobra.Command {
 
 func (s *commandState) listingCommand() *cobra.Command {
 	parent := &cobra.Command{Use: "listing", Short: "Manage Store listing metadata"}
-	parent.AddCommand(s.listingPullCommand())
+	parent.AddCommand(s.listingPullCommand(), s.listingPushCommand())
 	return parent
 }
 
@@ -215,6 +217,143 @@ func (s *commandState) listingPullCommand() *cobra.Command {
 	command.Flags().BoolVar(&published, "published", false, "pull the last published submission (default)")
 	command.Flags().BoolVar(&pending, "pending", false, "pull the pending submission")
 	command.MarkFlagsMutuallyExclusive("published", "pending")
+	return command
+}
+
+func (s *commandState) listingPushCommand() *cobra.Command {
+	var dir, releaseNotesPath string
+	var dryRun, skipCommit, yes, replacePending, allowLocaleRemoval bool
+	command := &cobra.Command{
+		Use:   "push",
+		Short: "Apply a metadata directory to a Store submission",
+		Args:  noArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if strings.TrimSpace(dir) == "" {
+				return usageError{errors.New("listing push requires --dir")}
+			}
+			modeCount := 0
+			for _, selected := range []bool{dryRun, skipCommit, yes} {
+				if selected {
+					modeCount++
+				}
+			}
+			if modeCount != 1 {
+				return usageError{errors.New("exactly one of --dry-run, --skip-commit, or --yes is required")}
+			}
+			if err := s.prepareClient(); err != nil {
+				return err
+			}
+			directory, err := metadataflow.LoadDirectory(dir, s.config.AppID)
+			if err != nil {
+				return failureError{err}
+			}
+			if !dryRun {
+				if err := s.prepareListingPublisher(); err != nil {
+					return err
+				}
+				poll, err := pollOptions(30, 20)
+				if err != nil {
+					return usageError{err}
+				}
+				result, err := s.listingPush.Push(cmd.Context(), submissionflow.ListingPushOptions{
+					AppID: s.config.AppID, MetadataDir: dir, Directory: directory,
+					ReleaseNotesPath: releaseNotesPath, SkipCommit: skipCommit, ReplacePending: replacePending,
+					AllowLocaleRemoval: allowLocaleRemoval, Poll: poll,
+				})
+				if err != nil {
+					return failureError{err}
+				}
+				renderer := output.NewRenderer(s.dependencies.Stdout, s.format)
+				if s.format == output.JSON {
+					return wrapFailure(renderer.Value(result))
+				}
+				status := result.Commit.Status
+				if result.Draft {
+					status = "PendingCommit draft"
+				}
+				if err := renderer.Rows(
+					[]string{"SUBMISSION", "STATUS", "LISTING CHANGES", "IMAGE CHANGES", "UPLOADS"},
+					[][]string{{result.SubmissionID, status, strconv.Itoa(len(result.Plan.ListingChanges)), strconv.Itoa(len(result.Plan.ImageChanges)), strconv.Itoa(len(result.Plan.Uploads))}},
+				); err != nil {
+					return failureError{err}
+				}
+				if result.NextCommand != "" {
+					_, err = fmt.Fprintln(s.dependencies.Stdout, "Next:", result.NextCommand)
+					return wrapFailure(err)
+				}
+				return nil
+			}
+			app, err := s.client.Application(cmd.Context(), s.config.AppID)
+			if err != nil {
+				return failureError{err}
+			}
+			if app.LastPublishedApplicationSubmission == nil {
+				return failureError{errors.New("application has no published submission")}
+			}
+			if pending := app.PendingApplicationSubmission; pending != nil {
+				pendingSubmission, pendingErr := s.client.Submission(cmd.Context(), s.config.AppID, pending.ID)
+				if pendingErr != nil {
+					return failureError{pendingErr}
+				}
+				if !replacePending {
+					return failureError{fmt.Errorf("app already has pending submission %s with status %s; resolve it or pass --replace-pending", pending.ID, pendingSubmission.Status)}
+				}
+				if pendingSubmission.Status != "PendingCommit" {
+					return failureError{fmt.Errorf("pending submission %s has status %s; only PendingCommit can be replaced automatically", pending.ID, pendingSubmission.Status)}
+				}
+			}
+			source, err := s.client.Submission(cmd.Context(), s.config.AppID, app.LastPublishedApplicationSubmission.ID)
+			if err != nil {
+				return failureError{err}
+			}
+			plan, err := metadataflow.BuildPushPlan(dir, directory, source.Raw, allowLocaleRemoval)
+			if err != nil {
+				return failureError{err}
+			}
+			warnings := []string{}
+			hasChanges := plan.HasChanges()
+			if releaseNotesPath != "" {
+				notesData, readErr := os.ReadFile(releaseNotesPath)
+				if readErr != nil {
+					return failureError{fmt.Errorf("read release notes: %w", readErr)}
+				}
+				plan.Body, warnings, err = submissionflow.ApplyReleaseNotes(plan.Body, notesData, releaseNotesPath)
+				if err != nil {
+					return failureError{err}
+				}
+				hasChanges = true
+			}
+			result := struct {
+				DryRun         bool                         `json:"dryRun"`
+				HasChanges     bool                         `json:"hasChanges"`
+				ListingChanges []metadataflow.ListingChange `json:"listingChanges"`
+				ImageChanges   []metadataflow.ImageChange   `json:"imageChanges"`
+				UploadCount    int                          `json:"uploadCount"`
+				ReleaseNotes   bool                         `json:"releaseNotes"`
+				Body           json.RawMessage              `json:"body"`
+				Warnings       []string                     `json:"warnings,omitempty"`
+			}{true, hasChanges, plan.ListingChanges, plan.ImageChanges, len(plan.Uploads), releaseNotesPath != "", plan.Body, warnings}
+			renderer := output.NewRenderer(s.dependencies.Stdout, s.format)
+			if s.format == output.JSON {
+				return wrapFailure(renderer.Value(result))
+			}
+			if err := renderer.Rows(
+				[]string{"MODE", "CHANGES", "LISTING CHANGES", "IMAGE CHANGES", "UPLOADS"},
+				[][]string{{"dry-run", strconv.FormatBool(result.HasChanges), strconv.Itoa(len(result.ListingChanges)), strconv.Itoa(len(result.ImageChanges)), strconv.Itoa(result.UploadCount)}},
+			); err != nil {
+				return failureError{err}
+			}
+			_, err = fmt.Fprintln(s.dependencies.Stdout, "PUT body:", string(result.Body))
+			return wrapFailure(err)
+		},
+	}
+	command.Flags().StringVar(&dir, "dir", "", "metadata directory")
+	command.Flags().BoolVar(&dryRun, "dry-run", false, "print changes without creating a submission")
+	command.Flags().BoolVar(&skipCommit, "skip-commit", false, "create and leave an uncommitted draft")
+	command.Flags().BoolVar(&yes, "yes", false, "create and commit the submission")
+	command.Flags().StringVar(&releaseNotesPath, "release-notes", "", "release-notes JSON file")
+	command.Flags().BoolVar(&replacePending, "replace-pending", false, "delete an existing PendingCommit draft")
+	command.Flags().BoolVar(&allowLocaleRemoval, "allow-locale-removal", false, "allow Store locales missing from the metadata directory to be removed")
 	return command
 }
 
@@ -827,6 +966,24 @@ func (s *commandState) preparePublisher() error {
 		return failureError{err}
 	}
 	s.publisher = publisher
+	return nil
+}
+
+func (s *commandState) prepareListingPublisher() error {
+	if s.listingPush != nil {
+		return nil
+	}
+	if err := s.prepareManager(); err != nil {
+		return err
+	}
+	publisher, err := submissionflow.NewListingPublisher(submissionflow.ListingPublisherOptions{
+		Client: s.client, Manager: s.manager, Uploader: submissionflow.NewAzureBlobUploader(),
+		Warn: func(message string) { _, _ = fmt.Fprintln(s.dependencies.Stderr, "Warning:", message) },
+	})
+	if err != nil {
+		return failureError{err}
+	}
+	s.listingPush = publisher
 	return nil
 }
 

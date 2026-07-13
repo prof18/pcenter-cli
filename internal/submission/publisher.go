@@ -194,25 +194,7 @@ func (p *Publisher) PublishMSIX(ctx context.Context, options PublishMSIXOptions)
 }
 
 func (p *Publisher) uploadWithSASRefresh(ctx context.Context, appID, submissionID, uploadURL, zipPath string) error {
-	currentURL := uploadURL
-	for attempt := 1; attempt <= 4; attempt++ {
-		err := p.uploader.Upload(ctx, currentURL, zipPath)
-		if err == nil {
-			return nil
-		}
-		if !IsForbiddenUploadError(err) || attempt == 4 {
-			return err
-		}
-		fresh, refreshErr := p.client.Submission(ctx, appID, submissionID)
-		if refreshErr != nil {
-			return fmt.Errorf("blob upload SAS expired and submission refresh failed: %w", refreshErr)
-		}
-		if fresh.FileUploadURL == "" {
-			return errors.New("refreshed submission did not contain fileUploadUrl")
-		}
-		currentURL = fresh.FileUploadURL
-	}
-	return errors.New("blob upload attempts exhausted")
+	return uploadWithSASRefresh(ctx, p.client, p.uploader, appID, submissionID, uploadURL, zipPath)
 }
 
 func validatePublishOptions(options PublishMSIXOptions) (string, []byte, error) {

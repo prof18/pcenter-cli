@@ -51,10 +51,12 @@ Acceptance:
 - [x] `internal/metadata`: dir read/write, `store.json` identity marker, listing file schema + client-side limits, images manifest, sha256 diffing, case-insensitive locale handling
 - [x] Resolve the `remote-only` no-op contradiction. Plan decision (2026-07-14): retained `remoteOnly` and unmentioned server entries are kept unchanged; a missing managed local file is an error; only an explicit `delete: true` entry with `storeId` becomes `PendingDelete`.
 - [x] `listing pull` (published/pending source, `remote-only` image entries)
-- [ ] `listing push`: mode enforcement (`--dry-run | --skip-commit | --yes`), identity guard, text application, image add/replace/delete + ZIP upload, locale add, `--allow-locale-removal` guard, `--release-notes`, `--dry-run` diff output
+- [x] `listing push`: mode enforcement (`--dry-run | --skip-commit | --yes`), identity guard, text application, image add/replace/delete + ZIP upload, locale add, `--allow-locale-removal` guard, `--release-notes`, `--dry-run` diff output
 - [ ] V1: verify locale add/remove via update PUT with a live `--skip-commit` draft; document result
-- [ ] Encode confirmed image limits (PNG only, ≤50 MB, desktop ≥1366×768, ≤10 desktop / ≤8 other per locale, caption ≤200 chars — doc 05); V2 residual: confirm the API enforces the same limits on first live push
-- [ ] Hardware fields (`recommendedHardware`/`minimumHardware`): raw passthrough on pull, lenient validation (docs type ambiguity — doc 05); confirm shape from first live pull
+- [x] Encode confirmed image limits (PNG only, ≤50 MB, desktop ≥1366×768, ≤10 desktop / ≤8 other per locale, caption ≤200 chars — doc 05)
+- [ ] V2 residual: confirm the API enforces the same image limits on the first live push
+- [x] Hardware fields (`recommendedHardware`/`minimumHardware`): raw passthrough on pull and lenient validation (docs type ambiguity — doc 05)
+- [ ] Confirm the hardware field shape from the first live pull
 - [ ] V3: verify a metadata-only submission can carry `packageDeliveryOptions` through unchanged
 
 Acceptance:
