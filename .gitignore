@@ -10,6 +10,7 @@ plan/LOCAL.md
 /pcenter.exe
 dist/
 coverage.out
+/.cache/
 
 # Editors / OS
 .DS_Store
