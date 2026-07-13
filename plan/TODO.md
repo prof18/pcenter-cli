@@ -49,6 +49,7 @@ Acceptance:
 ## M4 — `listing pull` / `listing push`
 
 - [ ] `internal/metadata`: dir read/write, `store.json` identity marker, listing file schema + client-side limits, images manifest, sha256 diffing, case-insensitive locale handling
+- [ ] Resolve the `remote-only` no-op contradiction: doc 05 says `pull` marks server images without downloadable binaries as `remote-only` and `push` marks server entries (including `remote-only`) with no local file `PendingDelete`, while M4 acceptance requires an immediate `pull` → `push --dry-run` to report no changes. Decide whether a retained `remote-only` manifest entry is the explicit keep signal.
 - [ ] `listing pull` (published/pending source, `remote-only` image entries)
 - [ ] `listing push`: mode enforcement (`--dry-run | --skip-commit | --yes`), identity guard, text application, image add/replace/delete + ZIP upload, locale add, `--allow-locale-removal` guard, `--release-notes`, `--dry-run` diff output
 - [ ] V1: verify locale add/remove via update PUT with a live `--skip-commit` draft; document result
