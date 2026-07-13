@@ -40,7 +40,7 @@ Acceptance:
 - [x] `MS-CorrelationId` header (one GUID per invocation) on all Store API calls, included in error output
 - [x] Full `publish msix` flow incl. `--skip-commit`, `--replace-pending`, cleanup-on-failure, temp-file cleanup
 - [x] Parity tests: request sequence matches `publish-msix-to-store.ps1` for happy path, pending-draft path, failure-cleanup path
-- [ ] Resolve live validation discrepancy: the draft accepted the package and 90% rollout but its API resource returned an empty `listings` object; the draft was deleted after inspection. After the current live rollout finishes, confirm the listing state in the Partner Center UI and reconcile it with the API response before repeating acceptance.
+- [ ] Resolve the live-acceptance contradiction: Microsoft's [StoreBroker usage guide](https://github.com/microsoft/StoreBroker/blob/master/Documentation/USAGE.md#creating-a-new-application-submission) says the Dev Portal remains out of sync with Submission API changes until a submission enters certification, but acceptance below requires inspecting an uncommitted `--skip-commit` draft in Partner Center. API inspection of the live draft confirmed all 25 listings, exact release-note matches, the pending package, and 90% rollout; the draft was deleted. Do not redefine this acceptance criterion without an explicit plan decision.
 
 Acceptance:
 - [x] Parity tests green
