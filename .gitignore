@@ -1,0 +1,17 @@
+# Machine-specific plan pointers — never commit
+plan/LOCAL.md
+
+# Credentials
+*.env
+!testdata/**/*.env
+
+# Go / build
+/pcenter
+/pcenter.exe
+dist/
+coverage.out
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
