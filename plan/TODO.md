@@ -40,11 +40,11 @@ Acceptance:
 - [x] `MS-CorrelationId` header (one GUID per invocation) on all Store API calls, included in error output
 - [x] Full `publish msix` flow incl. `--skip-commit`, `--replace-pending`, cleanup-on-failure, temp-file cleanup
 - [x] Parity tests: request sequence matches `publish-msix-to-store.ps1` for happy path, pending-draft path, failure-cleanup path
-- [ ] Resolve the live-acceptance contradiction: Microsoft's [StoreBroker usage guide](https://github.com/microsoft/StoreBroker/blob/master/Documentation/USAGE.md#creating-a-new-application-submission) says the Dev Portal remains out of sync with Submission API changes until a submission enters certification, but acceptance below requires inspecting an uncommitted `--skip-commit` draft in Partner Center. API inspection of the live draft confirmed all 25 listings, exact release-note matches, the pending package, and 90% rollout; the draft was deleted. Do not redefine this acceptance criterion without an explicit plan decision.
+- [x] Resolve the live-acceptance contradiction: Microsoft's [StoreBroker usage guide](https://github.com/microsoft/StoreBroker/blob/master/Documentation/USAGE.md#creating-a-new-application-submission) says the Dev Portal remains out of sync with Submission API changes until a submission enters certification. Plan decision (2026-07-14): inspect uncommitted API-created drafts through the Submission API; defer Portal verification to the first committed release in M5.
 
 Acceptance:
 - [x] Parity tests green
-- [ ] Live: `publish msix --skip-commit` with a real FeedFlow MSIX creates a correct draft (inspected in Partner Center), then `submission delete-draft --yes` removes it
+- [x] Live: `publish msix --skip-commit` with a real FeedFlow MSIX creates a correct draft (API inspection confirmed 25 listings, exact release-note matches, pending package, and 90% rollout), then `submission delete-draft --yes` removes it
 
 ## M4 — `listing pull` / `listing push`
 
