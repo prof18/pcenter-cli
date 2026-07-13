@@ -1,0 +1,21 @@
+{
+  "applicationCategory": "BooksAndReference",
+  "pricing": {"marketSpecificPricings": {}, "unknownPricingField": true},
+  "visibility": "Public",
+  "listings": {
+    "en-us": {"baseListing": {"description": "English", "releaseNotes": "old"}, "unknownListingField": 7},
+    "it": {"baseListing": {"description": "Italiano", "releaseNotes": "old"}}
+  },
+  "targetPublishMode": "Immediate",
+  "applicationPackages": [
+    {"fileName": "newest.msix", "version": "2.0.0.0", "fileStatus": "Uploaded", "architectures": ["X64"]},
+    {"fileName": "old.msix", "version": "1.2.0.0", "fileStatus": "PendingDelete", "unknownPackageField": "preserve"},
+    {"fileName": "FeedFlow.msix", "fileStatus": "PendingUpload", "minimumDirectXVersion": "None", "minimumSystemRam": "None"}
+  ],
+  "packageDeliveryOptions": {
+    "packageRollout": {"isPackageRollout": true, "packageRolloutPercentage": 90, "futureRolloutField": "keep"},
+    "isMandatoryUpdate": true,
+    "mandatoryUpdateEffectiveDate": "2026-01-01T00:00:00Z",
+    "futureDeliveryField": {"keep": true}
+  }
+}

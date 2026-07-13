@@ -54,6 +54,7 @@ type commandState struct {
 	format       output.Format
 	client       *store.Client
 	manager      *submissionflow.Manager
+	publisher    *submissionflow.Publisher
 	config       config.Config
 }
 
@@ -124,6 +125,7 @@ func (s *commandState) rootCommand() *cobra.Command {
 		s.reviewsCommand(),
 		s.submissionCommand(),
 		s.rolloutCommand(),
+		s.publishCommand(),
 	)
 	return root
 }
@@ -453,6 +455,12 @@ func (s *commandState) rolloutFinalizeCommand() *cobra.Command {
 			if err != nil {
 				return failureError{err}
 			}
+			if rollout.PackageRolloutStatus == "" {
+				rollout, err = s.client.Rollout(cmd.Context(), s.config.AppID, submissionID)
+				if err != nil {
+					return failureError{err}
+				}
+			}
 			return s.renderRollout(rollout)
 		},
 	}
@@ -524,6 +532,74 @@ func (s *commandState) rolloutHaltCommand() *cobra.Command {
 	}
 	command.Flags().BoolVar(&yes, "yes", false, "confirm halting the rollout")
 	return command
+}
+
+func (s *commandState) publishCommand() *cobra.Command {
+	parent := &cobra.Command{Use: "publish", Short: "Publish Store packages"}
+	var msixPath, releaseNotesPath string
+	var rolloutPercentage float64
+	var keepExisting, skipCommit, replacePending bool
+	var pollSeconds, pollAttempts int
+	command := &cobra.Command{
+		Use:   "msix",
+		Short: "Prepare and optionally commit an MSIX submission",
+		Args:  noArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if strings.TrimSpace(msixPath) == "" {
+				return usageError{errors.New("publish msix requires --path")}
+			}
+			if (releaseNotesPath != "") == keepExisting {
+				return usageError{errors.New("exactly one of --release-notes or --keep-existing-release-notes is required")}
+			}
+			if rolloutPercentage <= 0 || rolloutPercentage > 100 {
+				return usageError{errors.New("--rollout-percentage must be greater than 0 and at most 100")}
+			}
+			poll, err := pollOptions(pollSeconds, pollAttempts)
+			if err != nil {
+				return usageError{err}
+			}
+			if err := s.preparePublisher(); err != nil {
+				return err
+			}
+			result, err := s.publisher.PublishMSIX(cmd.Context(), submissionflow.PublishMSIXOptions{
+				AppID: s.config.AppID, MSIXPath: msixPath, ReleaseNotesPath: releaseNotesPath,
+				KeepExistingReleaseNotes: keepExisting, RolloutPercentage: rolloutPercentage,
+				SkipCommit: skipCommit, ReplacePending: replacePending, Poll: poll,
+			})
+			if err != nil {
+				return failureError{err}
+			}
+			renderer := output.NewRenderer(s.dependencies.Stdout, s.format)
+			if s.format == output.JSON {
+				return wrapFailure(renderer.Value(result))
+			}
+			status := result.Commit.Status
+			if result.Draft {
+				status = "PendingCommit draft"
+			}
+			if err := renderer.Rows(
+				[]string{"SUBMISSION", "PACKAGE", "ROLLOUT", "STATUS"},
+				[][]string{{result.SubmissionID, result.PackageFileName, strconv.FormatFloat(result.RolloutPercentage, 'f', -1, 64) + "%", status}},
+			); err != nil {
+				return failureError{err}
+			}
+			if result.NextCommand != "" {
+				_, err = fmt.Fprintln(s.dependencies.Stdout, "Next:", result.NextCommand)
+				return wrapFailure(err)
+			}
+			return nil
+		},
+	}
+	command.Flags().StringVar(&msixPath, "path", "", "path to the MSIX package")
+	command.Flags().StringVar(&releaseNotesPath, "release-notes", "", "release-notes JSON file")
+	command.Flags().BoolVar(&keepExisting, "keep-existing-release-notes", false, "explicitly retain cloned release notes")
+	command.Flags().Float64Var(&rolloutPercentage, "rollout-percentage", 90, "package rollout percentage")
+	command.Flags().BoolVar(&skipCommit, "skip-commit", false, "leave an uncommitted draft")
+	command.Flags().BoolVar(&replacePending, "replace-pending", false, "delete an existing PendingCommit draft")
+	command.Flags().IntVar(&pollSeconds, "poll-seconds", 30, "seconds between status polls")
+	command.Flags().IntVar(&pollAttempts, "poll-attempts", 20, "maximum status polls")
+	parent.AddCommand(command)
+	return parent
 }
 
 func (s *commandState) reviewsCommand() *cobra.Command {
@@ -645,6 +721,24 @@ func (s *commandState) prepareManager() error {
 		return failureError{err}
 	}
 	s.manager = manager
+	return nil
+}
+
+func (s *commandState) preparePublisher() error {
+	if s.publisher != nil {
+		return nil
+	}
+	if err := s.prepareManager(); err != nil {
+		return err
+	}
+	publisher, err := submissionflow.NewPublisher(submissionflow.PublisherOptions{
+		Client: s.client, Manager: s.manager, Uploader: submissionflow.NewAzureBlobUploader(),
+		Warn: func(message string) { _, _ = fmt.Fprintln(s.dependencies.Stderr, "Warning:", message) },
+	})
+	if err != nil {
+		return failureError{err}
+	}
+	s.publisher = publisher
 	return nil
 }
 

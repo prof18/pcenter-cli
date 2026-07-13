@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // SubmissionRef is the submission summary embedded in an application.
@@ -87,6 +88,8 @@ type Options struct {
 	CreateScenario      MutationScenario
 	CommitScenario      MutationScenario
 	DeleteScenario      MutationScenario
+	BlobEnabled         bool
+	BlobForbiddenCount  int
 }
 
 // Request is a sanitized journal entry. It records presence, never credential values.
@@ -102,19 +105,22 @@ type Request struct {
 
 // Server is an httptest implementation of the Partner Center surface used by pcenter.
 type Server struct {
-	mu          sync.Mutex
-	server      *httptest.Server
-	options     Options
-	failures    []Failure
-	journal     []Request
-	app         App
-	submissions map[string]json.RawMessage
-	rollouts    map[string]Rollout
-	statusQueue map[string][]string
-	finalize    MutationScenario
-	create      MutationScenario
-	commit      MutationScenario
-	deleteDraft MutationScenario
+	mu             sync.Mutex
+	server         *httptest.Server
+	options        Options
+	failures       []Failure
+	journal        []Request
+	app            App
+	submissions    map[string]json.RawMessage
+	rollouts       map[string]Rollout
+	statusQueue    map[string][]string
+	finalize       MutationScenario
+	create         MutationScenario
+	commit         MutationScenario
+	deleteDraft    MutationScenario
+	blobForbidden  int
+	blobGeneration int
+	blobUploads    [][]byte
 }
 
 // New starts a fake Store server and registers cleanup with t.
@@ -124,16 +130,18 @@ func New(t testing.TB, options Options) *Server {
 		options.AccessToken = "fake-access-token"
 	}
 	s := &Server{
-		options:     options,
-		failures:    append([]Failure(nil), options.Failures...),
-		app:         options.App,
-		submissions: cloneRawMessages(options.Submissions),
-		rollouts:    cloneRollouts(options.Rollouts),
-		statusQueue: cloneStatusQueues(options.StatusQueues),
-		finalize:    options.FinalizeScenario,
-		create:      options.CreateScenario,
-		commit:      options.CommitScenario,
-		deleteDraft: options.DeleteScenario,
+		options:        options,
+		failures:       append([]Failure(nil), options.Failures...),
+		app:            options.App,
+		submissions:    cloneRawMessages(options.Submissions),
+		rollouts:       cloneRollouts(options.Rollouts),
+		statusQueue:    cloneStatusQueues(options.StatusQueues),
+		finalize:       options.FinalizeScenario,
+		create:         options.CreateScenario,
+		commit:         options.CommitScenario,
+		deleteDraft:    options.DeleteScenario,
+		blobForbidden:  options.BlobForbiddenCount,
+		blobGeneration: 1,
 	}
 	s.server = httptest.NewServer(http.HandlerFunc(s.handle))
 	t.Cleanup(s.server.Close)
@@ -169,6 +177,17 @@ func (s *Server) SetStatusQueue(submissionID string, statuses []string) {
 	s.statusQueue[submissionID] = append([]string(nil), statuses...)
 }
 
+// BlobUploads returns captured successful upload request bodies.
+func (s *Server) BlobUploads() [][]byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	result := make([][]byte, len(s.blobUploads))
+	for index, upload := range s.blobUploads {
+		result[index] = append([]byte(nil), upload...)
+	}
+	return result
+}
+
 func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
 	s.record(r, body)
@@ -177,6 +196,8 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch {
+	case r.Method == http.MethodPut && r.URL.Path == "/blob/upload.zip":
+		s.handleBlobUpload(w, body)
 	case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/oauth2/token"):
 		writeJSON(w, http.StatusOK, map[string]any{"access_token": s.options.AccessToken, "token_type": "Bearer", "expires_in": 3600})
 	case r.Method == http.MethodGet && r.URL.Path == "/v1.0/my/applications/"+s.options.AppID:
@@ -190,6 +211,8 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		s.handleDelete(w, r)
 	case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/v1.0/my/applications/"+s.options.AppID+"/submissions/"):
 		s.handleSubmissionPOST(w, r)
+	case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/v1.0/my/applications/"+s.options.AppID+"/submissions/"):
+		s.handleSubmissionPUT(w, r, body)
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1.0/my/applications/"+s.options.AppID+"/submissions/"):
 		s.handleSubmissionGET(w, r)
 	case r.Method == http.MethodGet && r.URL.Path == "/v1.0/my/analytics/reviews":
@@ -330,6 +353,11 @@ func (s *Server) handleCreate(w http.ResponseWriter) {
 		if len(raw) == 0 {
 			raw = json.RawMessage(fmt.Sprintf(`{"id":%q,"status":"PendingCommit","listings":{}}`, id))
 		}
+		raw = withRawField(raw, "id", id)
+		raw = withRawField(raw, "status", "PendingCommit")
+		if s.options.BlobEnabled {
+			raw = withRawField(raw, "fileUploadUrl", s.blobURL())
+		}
 		s.submissions[id] = raw
 		s.app.PendingApplicationSubmission = &SubmissionRef{ID: id, Status: "PendingCommit"}
 	}
@@ -342,6 +370,55 @@ func (s *Server) handleCreate(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(s.submissions[id])
+}
+
+func (s *Server) handleSubmissionPUT(w http.ResponseWriter, r *http.Request, body []byte) {
+	prefix := "/v1.0/my/applications/" + s.options.AppID + "/submissions/"
+	id := strings.TrimPrefix(r.URL.Path, prefix)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.submissions[id]; !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "submission not found"})
+		return
+	}
+	if !json.Valid(body) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	updated := append(json.RawMessage(nil), body...)
+	updated = withRawField(updated, "id", id)
+	updated = withRawField(updated, "status", "PendingCommit")
+	if s.options.BlobEnabled {
+		updated = withRawField(updated, "fileUploadUrl", s.blobURL())
+	}
+	s.submissions[id] = updated
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(updated)
+}
+
+func (s *Server) handleBlobUpload(w http.ResponseWriter, body []byte) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.blobForbidden > 0 {
+		s.blobForbidden--
+		s.blobGeneration++
+		if pending := s.app.PendingApplicationSubmission; pending != nil {
+			if raw, ok := s.submissions[pending.ID]; ok {
+				s.submissions[pending.ID] = withRawField(raw, "fileUploadUrl", s.blobURL())
+			}
+		}
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "expired SAS"})
+		return
+	}
+	s.blobUploads = append(s.blobUploads, append([]byte(nil), body...))
+	w.Header().Set("ETag", `"fake-etag"`)
+	w.Header().Set("Last-Modified", time.Now().UTC().Format(http.TimeFormat))
+	w.WriteHeader(http.StatusCreated)
+}
+
+func (s *Server) blobURL() string {
+	return fmt.Sprintf("%s/blob/upload.zip?sv=1&sig=fake+signature+%d", s.server.URL, s.blobGeneration)
 }
 
 func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
@@ -504,6 +581,23 @@ func withSubmissionStatus(raw json.RawMessage, status string) json.RawMessage {
 	}
 	value["status"] = status
 	updated, err := json.Marshal(value)
+	if err != nil {
+		return raw
+	}
+	return updated
+}
+
+func withRawField(raw json.RawMessage, field, value string) json.RawMessage {
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &object); err != nil {
+		return raw
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return raw
+	}
+	object[field] = encoded
+	updated, err := json.Marshal(object)
 	if err != nil {
 		return raw
 	}

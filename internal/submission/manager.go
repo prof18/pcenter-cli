@@ -48,6 +48,7 @@ type CommitResult struct {
 	Status        string          `json:"status"`
 	StatusDetails json.RawMessage `json:"statusDetails,omitempty"`
 	Warning       string          `json:"warning,omitempty"`
+	Accepted      bool            `json:"accepted"`
 }
 
 // StatusClass is the full-status taxonomy used by submission watch.
@@ -84,9 +85,13 @@ func (m *Manager) FinalizeRollout(ctx context.Context, appID, submissionID strin
 	path := submissionPath(appID, submissionID) + "/finalizepackagerollout"
 	var lastError error
 	for attempt := 1; attempt <= finalizeBackoff.Attempts; attempt++ {
-		_, err := m.client.DoJSON(ctx, http.MethodPost, path, nil)
+		raw, err := m.client.DoJSON(ctx, http.MethodPost, path, nil)
 		if err == nil {
-			return m.client.Rollout(ctx, appID, submissionID)
+			var rollout storetypes.Rollout
+			if len(raw) > 0 {
+				_ = json.Unmarshal(raw, &rollout)
+			}
+			return rollout, nil
 		}
 		if isConflict(err) {
 			return storetypes.Rollout{}, m.rolloutStateError(ctx, appID, submissionID, err)
@@ -188,7 +193,9 @@ func (m *Manager) Commit(ctx context.Context, appID, submissionID string, poll P
 	if !accepted {
 		return CommitResult{}, fmt.Errorf("commit was not accepted after %d attempts: %w", commitBackoff.Attempts, lastError)
 	}
-	return m.pollCommitStartup(ctx, appID, submissionID, poll)
+	result, err := m.pollCommitStartup(ctx, appID, submissionID, poll)
+	result.Accepted = true
+	return result, err
 }
 
 // Watch polls using the complete submission-status taxonomy.

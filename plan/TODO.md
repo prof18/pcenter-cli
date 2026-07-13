@@ -34,15 +34,16 @@ Acceptance:
 
 ## M3 — `publish msix`
 
-- [ ] PUT-body builder: allowlist clone, unknown-field round-trip, package sort/PendingDelete rules, rollout options (golden JSON tests)
-- [ ] Release-notes parsing/validation (string|array, `\r\n` join, missing-locale hard fail, unused-locale warning, case-insensitive locale matching); `--release-notes` xor `--keep-existing-release-notes` enforcement
-- [ ] ZIP creation (Store/no-compression entries) + blob upload via the Go `azblob` SDK (chunked, SDK retries aligned with the blob schedule), size-scaled overall timeout, 403 → `fileUploadUrl` refresh, SAS `+`→`%2B` re-encoding (unit-tested)
-- [ ] `MS-CorrelationId` header (one GUID per invocation) on all Store API calls, included in error output
-- [ ] Full `publish msix` flow incl. `--skip-commit`, `--replace-pending`, cleanup-on-failure, temp-file cleanup
-- [ ] Parity tests: request sequence matches `publish-msix-to-store.ps1` for happy path, pending-draft path, failure-cleanup path
+- [x] PUT-body builder: allowlist clone, unknown-field round-trip, package sort/PendingDelete rules, rollout options (golden JSON tests)
+- [x] Release-notes parsing/validation (string|array, `\r\n` join, missing-locale hard fail, unused-locale warning, case-insensitive locale matching); `--release-notes` xor `--keep-existing-release-notes` enforcement
+- [x] ZIP creation (Store/no-compression entries) + blob upload via the Go `azblob` SDK (chunked, SDK retries aligned with the blob schedule), size-scaled overall timeout, 403 → `fileUploadUrl` refresh, SAS `+`→`%2B` re-encoding (unit-tested)
+- [x] `MS-CorrelationId` header (one GUID per invocation) on all Store API calls, included in error output
+- [x] Full `publish msix` flow incl. `--skip-commit`, `--replace-pending`, cleanup-on-failure, temp-file cleanup
+- [x] Parity tests: request sequence matches `publish-msix-to-store.ps1` for happy path, pending-draft path, failure-cleanup path
+- [ ] Resolve live validation discrepancy: the draft accepted the package and 90% rollout but its API resource returned an empty `listings` object; the draft was deleted after inspection. After the current live rollout finishes, confirm the listing state in the Partner Center UI and reconcile it with the API response before repeating acceptance.
 
 Acceptance:
-- [ ] Parity tests green
+- [x] Parity tests green
 - [ ] Live: `publish msix --skip-commit` with a real FeedFlow MSIX creates a correct draft (inspected in Partner Center), then `submission delete-draft --yes` removes it
 
 ## M4 — `listing pull` / `listing push`
