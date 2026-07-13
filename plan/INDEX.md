@@ -8,6 +8,7 @@ Single entrypoint for implementing `pcenter`, the Microsoft Partner Center CLI f
 2. Work milestone by milestone from [TODO.md](TODO.md). Check off tasks as you complete them; do not start a milestone before the previous one's acceptance criteria pass.
 3. TDD is mandatory: the fake Partner Center server ([06-testing.md](06-testing.md)) is built in M1 and everything is test-driven through it. No real sleeping in tests.
 4. Never run mutating commands against the live Store unless a TODO task explicitly says so (always via `--skip-commit` drafts first).
+5. The repo is **local-only**: do not create a GitHub repo or push — the maintainer publishes it himself at the start of M5. Commit locally as you go, and keep every commit public-ready (no secrets, no machine paths).
 
 ## Reading order
 

@@ -4,8 +4,9 @@ Work top to bottom. Do not start a milestone before the previous one's acceptanc
 
 ## M1 — Scaffold + read-only commands
 
-- [ ] Init git repo and first commit (LICENSE and .gitignore already exist; `plan/LOCAL.md` is gitignored and must never be committed), create the **public** GitHub repo and push
-- [ ] Init Go module, repo layout from [02-architecture.md](02-architecture.md), CI workflow (test + golangci-lint on ubuntu/macos/windows; actions pinned to SHAs, minimal permissions)
+- [x] Init git repo and first commit (done 2026-07-10; `plan/LOCAL.md` is gitignored and must never be committed)
+- [ ] **Local-only until M5**: do NOT create a GitHub repo or push — the maintainer publishes the repo himself at the end. Still author everything as public-ready from commit one (no secrets, no machine paths)
+- [ ] Init Go module, repo layout from [02-architecture.md](02-architecture.md), CI workflow files (test + golangci-lint on ubuntu/macos/windows; actions pinned to SHAs, minimal permissions) — they'll only run once the repo is pushed
 - [ ] Renovate config for Go modules + GitHub Actions
 - [ ] `internal/config`: flag → env → env-file resolution, `PCENTER_ENV_FILE`, validation errors
 - [ ] `internal/store`: token acquisition (with retry), backoff policy (exponential + full jitter, `Retry-After` override, injectable clock/rand), transport retry for GET/PUT, transient-error classification, 401 → single token refresh + replay, bodyless-non-GET quirk, error messages including response bodies, centralized redaction (tokens, `client_secret`, SAS `sig=`)
@@ -16,7 +17,7 @@ Work top to bottom. Do not start a milestone before the previous one's acceptanc
 - [ ] E2E harness (`test/e2e`) running the compiled binary against fakestore
 
 Acceptance:
-- [ ] All tests green on the 3-OS CI matrix
+- [ ] All tests + `golangci-lint` green locally (the 3-OS CI matrix validates later, once the repo is pushed in M5)
 - [ ] Backoff unit tests prove exponential growth, cap, jitter bounds, and `Retry-After` override
 - [ ] Live smoke (`PCENTER_LIVE_SMOKE=1`, read-only): `locales list` returns FeedFlow's 25 locales; `reviews list` returns real reviews (validates the M/D/YYYY date conversion)
 
@@ -61,6 +62,8 @@ Acceptance:
 
 ## M5 — Release + feed-flow CI swap
 
+- [ ] **Maintainer step**: create the public GitHub repo (`pcenter-cli`) and push — Marco does this himself; everything below depends on it (CI matrix runs, goreleaser releases, feed-flow download)
+- [ ] Verify the 3-OS CI matrix is green on GitHub (deferred from M1)
 - [ ] goreleaser config (darwin/arm64, windows/amd64, linux/amd64), version ldflags, checksums, release workflow on tag
 - [ ] Tag `v0.1.0`; README install instructions (pinned download + checksum)
 - [ ] docs/: per-command reference + metadata dir format

@@ -12,7 +12,7 @@
 | Distribution | GitHub Releases via goreleaser: `darwin/arm64`, `windows/amd64`, `linux/amd64`. Consumers pin a version and verify checksums |
 | Metadata model | File-based pull/push; the canonical metadata dir lives in the consuming app's repo (feed-flow) and is passed via `--dir` |
 | Interactivity | None. JSON-first, no prompts (like the ASC CLI). Destructive ops require explicit flags |
-| License | Apache-2.0 (matches feed-flow); repo is public/open source from the start |
+| License | Apache-2.0 (matches feed-flow). Repo is **local-only during development**; the maintainer publishes it to GitHub at the end (M5). Everything must still be written as public-ready from commit one — no secrets, no machine paths |
 
 ## Repo layout
 
