@@ -79,15 +79,18 @@ Repo-independent (can be authored before the repo exists):
 
 Needs the repo to exist — test order and open questions in [08-release-testing.md](08-release-testing.md):
 
-- [ ] **Maintainer step**: create the public GitHub repo (`pcenter-cli`) and push — Marco does this himself; everything below depends on it
-- [ ] Verify the 3-OS CI matrix is green on GitHub (deferred from M1)
+- [x] **Maintainer step**: public GitHub repo created and pushed (2026-08-07)
+- [x] Verify the 3-OS CI matrix is green on GitHub (deferred from M1) — green on the third run; the first two runs found two real Windows-only faults, both fixed:
+  - a test substring-matched a Windows path inside JSON output, where every backslash is escaped — now asserted on the decoded fields
+  - the runner checks out with `core.autocrlf=true`, so every `.go` file arrived as CRLF and failed gofmt. Only three files were named because golangci-lint caps repeats of one issue at three, which disguised a whole-checkout problem as a three-file one. Fixed with `.gitattributes` (`* text=auto eol=lf`)
 - [ ] Walk the Tier 0 and Tier 1 sweep in [09-manual-live-testing.md](09-manual-live-testing.md) against FeedFlow; record results in its table
-- [ ] Tag `v0.0.1` — a real release, not an RC (maintainer direction 2026-08-07, rationale in [08-release-testing.md](08-release-testing.md) §"`v0.0.1` instead of a release candidate"); walk the five checks in §"What only a real release can prove"; confirm the release carries all five archives + `checksums.txt` and that the published binary reports the tagged version
+- [x] Tag `v0.0.1` — a real release, not an RC (maintainer direction 2026-08-07, rationale in [08-release-testing.md](08-release-testing.md) §"`v0.0.1` instead of a release candidate"). Release carries all five archives + `checksums.txt` under the expected names, is not a pre-release, and takes its notes from the changelog. Verified by downloading the published `darwin_arm64` archive: checksum matches and the binary reports `v0.0.1` at the tagged commit
 - [ ] Settle the remaining open question: where the windows zip gets smoke-tested (the pre-release question is moot — `v0.0.1` is a normal release)
-- [ ] `prof18/homebrew-tap`: add `Formula/pcenter.rb` (darwin+linux only — Homebrew has no Windows channel) and `.github/workflows/update-pcenter.yml`, both cloned from the regesto pair; `script/update-formula.py` is already tool-agnostic and needs no change
-- [ ] Formula `test do`: assert the stamped version, then two credential-free real-code paths — `listing push --dry-run --yes` (exit 2, mode enforcement) and `listing push --dry-run` on a dir with no `store.json` (exit 1, identity guard). Both fire before any network call
-- [ ] Tap README: add a `pcenter` section alongside `regesto`
-- [ ] Verify end to end: `brew install prof18/tap/pcenter` on a clean machine, then `pcenter version` reports the tagged version
+- [x] `prof18/homebrew-tap`: `Formula/pcenter.rb` (darwin+linux only) and `.github/workflows/update-pcenter.yml` added, cron offset from regesto's. `script/update-formula.py` filled the formula's four checksums from the release's own `checksums.txt` unmodified, as predicted
+- [x] Formula `test do`: version stamp read back from JSON output (which also asserts the TTY-aware default), `listing push` mode enforcement (exit 2), `store.json` identity guard (exit 1). Proven by `brew install` + `brew test` through a throwaway tap before anything was pushed
+- [x] Tap README: `pcenter` section added alongside `regesto`
+- [x] Verify end to end: `brew install prof18/tap/pcenter` from the published tap reports `v0.0.1` at the tagged commit
+  - Note for the maintainer's machine: `script/dev-install.sh` leaves `~/.local/bin/pcenter`, which shadows Homebrew's on PATH. Remove that symlink to test the released binary by name
 - [ ] feed-flow: seed metadata dir via `listing pull`, commit ([07-feedflow-integration.md](07-feedflow-integration.md) §1)
 - [ ] feed-flow: swap `windows-release.yml` to pinned `pcenter` (§3)
 - [ ] After first green real release: delete the 3 ps1 scripts + `list-microsoft-store-locales.sh`, update docs/CLAUDE.md (§4–5)
