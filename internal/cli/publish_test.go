@@ -21,7 +21,7 @@ func TestPublishMSIXCommandPreparesSkipCommitDraft(t *testing.T) {
 	}
 	server := fakestore.New(t, fakestore.Options{
 		AppID:              "APP",
-		App:                fakestore.App{ID: "APP", LastPublishedApplicationSubmission: &fakestore.SubmissionRef{ID: "published", Status: "Published"}},
+		App:                fakestore.App{ID: "APP", LastPublishedApplicationSubmission: &fakestore.SubmissionRef{ID: "published"}},
 		Submissions:        map[string]json.RawMessage{"published": json.RawMessage(`{"id":"published","status":"Published"}`)},
 		Rollouts:           map[string]fakestore.Rollout{"published": {PackageRolloutStatus: "PackageRolloutCompleted"}},
 		CreateSubmissionID: "created",

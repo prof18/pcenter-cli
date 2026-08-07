@@ -17,8 +17,8 @@ func TestMutationFailuresCanApplyServerSideState(t *testing.T) {
 		AppID: "APP",
 		App: fakestore.App{
 			ID:                                 "APP",
-			LastPublishedApplicationSubmission: &fakestore.SubmissionRef{ID: "published", Status: "Published"},
-			PendingApplicationSubmission:       &fakestore.SubmissionRef{ID: "draft", Status: "PendingCommit"},
+			LastPublishedApplicationSubmission: &fakestore.SubmissionRef{ID: "published"},
+			PendingApplicationSubmission:       &fakestore.SubmissionRef{ID: "draft"},
 		},
 		Submissions: map[string]json.RawMessage{
 			"published": json.RawMessage(`{"id":"published","status":"Published"}`),
@@ -54,7 +54,7 @@ func TestMutationFailureCanLeaveStateUnchanged(t *testing.T) {
 		AppID: "APP",
 		App: fakestore.App{
 			ID:                                 "APP",
-			LastPublishedApplicationSubmission: &fakestore.SubmissionRef{ID: "published", Status: "Published"},
+			LastPublishedApplicationSubmission: &fakestore.SubmissionRef{ID: "published"},
 		},
 		Rollouts: map[string]fakestore.Rollout{
 			"published": {IsPackageRollout: true, PackageRolloutPercentage: 90, PackageRolloutStatus: "PackageRolloutInProgress"},

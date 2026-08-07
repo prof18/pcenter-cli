@@ -217,10 +217,10 @@ func newPublishFixture(t *testing.T, options publishFixtureOptions) publishFixtu
 	if options.rolloutInProgress {
 		rolloutStatus = "PackageRolloutInProgress"
 	}
-	app := fakestore.App{ID: "APP", LastPublishedApplicationSubmission: &fakestore.SubmissionRef{ID: "published", Status: "Published"}}
+	app := fakestore.App{ID: "APP", LastPublishedApplicationSubmission: &fakestore.SubmissionRef{ID: "published"}}
 	submissions := map[string]json.RawMessage{"published": json.RawMessage(`{"id":"published","status":"Published"}`)}
 	if options.withPending {
-		app.PendingApplicationSubmission = &fakestore.SubmissionRef{ID: "draft", Status: "PendingCommit"}
+		app.PendingApplicationSubmission = &fakestore.SubmissionRef{ID: "draft"}
 		submissions["draft"] = json.RawMessage(`{"id":"draft","status":"PendingCommit"}`)
 	}
 	created := json.RawMessage(`{

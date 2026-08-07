@@ -4,7 +4,10 @@ Global flags: `--output json|table`, `--env-file`, `--app-id`, `--verbose`. Conv
 
 ```
 pcenter version
-pcenter auth status
+pcenter auth login [--tenant-id --client-id --client-secret --app-id] [--skip-validation]
+pcenter auth status [--offline]
+pcenter auth doctor
+pcenter auth logout --yes
 pcenter app info
 pcenter locales list
 pcenter reviews list [--from --to --top --skip --all --market --filter --orderby]
@@ -20,6 +23,7 @@ pcenter rollout halt --yes
 pcenter publish msix --path <msix> (--release-notes <json> | --keep-existing-release-notes)
                     [--rollout-percentage 90] [--skip-commit] [--replace-pending]
                     [--poll-seconds 30] [--poll-attempts 20]
+pcenter listing show [--locale <locale>] [--published | --pending] [--images]
 pcenter listing pull --dir <metadata-dir> [--published | --pending]
 pcenter listing push --dir <metadata-dir> (--dry-run | --skip-commit | --yes)
                     [--release-notes <json>] [--replace-pending] [--allow-locale-removal]
@@ -28,13 +32,30 @@ pcenter listing push --dir <metadata-dir> (--dry-run | --skip-commit | --yes)
 ## Per-command behavior
 
 ### `version`
-Print version, commit, and build date (injected via goreleaser ldflags). Also available as `--version`.
+Print version, commit, and build date (injected via `-X` ldflags at release time). Also available as `--version`.
 
-### `auth status`
-Acquire a token, `GET applications/{appId}`. Print app name, last published submission id, pending submission id/status. Distinct non-zero exits per failure stage: env/config missing → usage error; token rejected → auth error; app fetch failed → API error.
+### `auth login`
+Write credentials to the env file (`--env-file` → `PCENTER_ENV_FILE` → `~/.config/pcenter/credentials.env`), created `0600` in a `0700` directory. Values come from flags; anything missing is **prompted for only when stdin is a terminal**, so scripts and CI fail with a message naming the flag instead of hanging. The client secret is read without echo.
+
+Credentials are verified against the Store before the file is written (`--skip-validation` opts out), so a typo fails here rather than in the next command. Writing merges: unlisted keys already in the file are kept, so adding an app id later does not discard the account credentials.
+
+The app id is optional — one account can publish several apps, so it is normally passed per command with `--app-id`. In CI prefer the `MS_STORE_*` environment variables straight from secrets; they take precedence over the file and need nothing written to the runner.
+
+### `auth status [--offline]`
+Print where each setting resolved from (flag / environment / env-file / not set) without printing values, then acquire a token and `GET applications/{appId}`. `--offline` stops after resolution. Distinct non-zero exits per failure stage: env/config missing → usage error; token rejected → auth error; app fetch failed → API error.
+
+### `auth doctor`
+Health check across the env file (existence, permissions — it holds a client secret), each `MS_STORE_*` setting and its source, token acquisition, and app reachability. Reports every check rather than stopping at the first problem, and exits non-zero when the setup is unusable, which makes it a CI preflight. Never prints the secret.
+
+JSON output is `{"ok": bool, "checks": [...]}` — a caller reads `.ok` instead of scanning statuses. Each check carries the human sentence in `detail` **and** the same facts as fields: `source`, `value` (omitted for secrets), `path`, `mode`, `remedy`. A failing check's `remedy` is a runnable command.
+
+### `auth logout --yes`
+Delete the credentials file. Idempotent — a missing file is not an error.
 
 ### `app info`
-Summary of `GET applications/{appId}`: name, id, published/pending submissions with statuses.
+`GET applications/{appId}` rendered as-is: id, name, package family/identity, publisher, first published date, advanced-listing permission, and the two submission ids.
+
+**Response shape, verified live 2026-08-06.** The display name is `primaryName`, **not** `name` — modelling it as `name` printed a blank name from every command until this was caught. Each submission reference carries only `{id, resourceLocation}` and **no status**, so a status column here could never be filled. Anything needing a status must fetch the submission itself; `submission status` does, at one request per referenced submission.
 
 ### `locales list`
 Keys of `listings` from the last published submission (or pending if no published exists). Replaces feed-flow's `.scripts/list-microsoft-store-locales.sh`.
@@ -43,7 +64,7 @@ Keys of `listings` from the last published submission (or pending if no publishe
 `GET analytics/reviews`. `--from/--to` accept ISO dates, converted to the API's `M/D/YYYY`; **when omitted, default to a wide range** (`1/1/2000` → today) because the API's own default (current day only) returns almost nothing. `--market` composes into `filter`; `--filter` passes raw OData; `--orderby` passes through (default `date desc`). `--top` ≤ 10000 (API max); `--all` follows `@nextLink` to exhaustion. Table columns: date, market, rating, title, truncated text, package version. JSON: raw review items.
 
 ### `submission status`
-Pending + last-published submission ids and statuses; when `statusDetails` has errors/warnings/certification reports, render them.
+Pending + last-published submission ids with their **real** statuses, fetched per submission via `GET .../submissions/{id}/status` because the application resource carries none. Renders `statusDetails` errors/warnings/certification reports.
 
 ### `submission get`
 Raw submission JSON to stdout (pending by default, `--published` for the published one, `--id` for any). `fileUploadUrl` is **redacted by default** (it contains a live SAS credential); `--include-upload-url` prints it.
@@ -76,6 +97,9 @@ Operate on the last published submission's package rollout. `status` prints `pac
 11. On any failure before commit started: delete the draft (best-effort, warn if that fails). Always clean up the temp ZIP.
 
 No `--yes` here by design: this command's whole purpose is the mutation, it runs unattended in CI, and step 2 already forces explicit intent for the risky part.
+
+### `listing show`
+Print the listing to stdout without writing anything. Same content `listing pull` writes, so reading the current text costs no directory and no cleanup — the case an agent hits constantly, and the reason this exists alongside `pull`. `--locale` limits to one locale (case-insensitive; an unknown one is an error naming `locales list`, not an empty result a caller could misread as "the listing is empty"). `--images` adds each image's type, caption and Store id; the binaries are not downloadable through the API, so a count is always present but the files never are. JSON returns `{source, submissionId, localeCount, listings}`; table gives one row per locale, or the full field values when `--locale` selects one.
 
 ### `listing pull`
 Snapshot the published (default) or pending submission into the metadata dir: `store.json` marker, per-locale listing files, images manifest. No binary downloads (the API provides none). Format in [05-metadata-directory.md](05-metadata-directory.md).

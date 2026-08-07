@@ -210,10 +210,10 @@ func newListingFixture(t *testing.T, options listingFixtureOptions) listingFixtu
 		"applicationPackages":[{"fileName":"app.msix","fileStatus":"Uploaded","version":"1.0.0.0","future":true}],
 		"packageDeliveryOptions":{"isMandatoryUpdate":false,"packageRollout":{"isPackageRollout":false},"future":9}
 	}`)
-	app := fakestore.App{ID: "APP", LastPublishedApplicationSubmission: &fakestore.SubmissionRef{ID: "published", Status: "Published"}}
+	app := fakestore.App{ID: "APP", LastPublishedApplicationSubmission: &fakestore.SubmissionRef{ID: "published"}}
 	submissions := map[string]json.RawMessage{"published": created}
 	if options.withPending {
-		app.PendingApplicationSubmission = &fakestore.SubmissionRef{ID: "draft", Status: "PendingCommit"}
+		app.PendingApplicationSubmission = &fakestore.SubmissionRef{ID: "draft"}
 		submissions["draft"] = json.RawMessage(`{"id":"draft","status":"PendingCommit"}`)
 	}
 	server := fakestore.New(t, fakestore.Options{

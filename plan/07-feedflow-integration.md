@@ -21,7 +21,7 @@ against the real Store. Inspect the draft in Partner Center (package attached, r
 
 Replace the `publish-msix-to-store.ps1` invocation with:
 
-1. Download the pinned `pcenter` release (windows/amd64 zip from GitHub Releases) and verify its sha256.
+1. Download the pinned `pcenter` release (windows/amd64 zip from GitHub Releases) and verify its sha256. Not Homebrew — this runner is Windows, and the tap covers macOS and Linux only. `brew install prof18/tap/pcenter` is the channel for running these commands by hand.
 2. Run:
    ```
    pcenter publish msix --path <msix> --rollout-percentage 90 \

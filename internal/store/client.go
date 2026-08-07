@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/prof18/pcenter-cli/internal/output"
 	storetypes "github.com/prof18/pcenter-cli/internal/store/types"
 )
 
@@ -75,6 +76,60 @@ func (e *APIError) Error() string {
 	return fmt.Sprintf("Partner Center %s %s failed with HTTP %d (correlation %s): %s", e.Method, e.URL, e.StatusCode, e.CorrelationID, e.Body)
 }
 
+// ErrorCode classifies the response so automation can tell a permanent state
+// conflict from throttling from a bad credential without parsing the message.
+func (e *APIError) ErrorCode() string {
+	switch e.StatusCode {
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return output.CodeAuthFailed
+	case http.StatusConflict:
+		return output.CodeStateConflict
+	case http.StatusNotFound:
+		return output.CodeNotFound
+	case http.StatusTooManyRequests:
+		return output.CodeRateLimited
+	default:
+		return output.CodeAPIError
+	}
+}
+
+// ErrorDetails exposes the correlation id as a field: CI and support tickets
+// need it, and digging it out of a formatted sentence is needless work.
+func (e *APIError) ErrorDetails() map[string]any {
+	details := map[string]any{
+		"correlationId": e.CorrelationID,
+		"statusCode":    e.StatusCode,
+		"method":        e.Method,
+		"url":           e.URL,
+	}
+	if e.RetryAfter != "" {
+		details["retryAfter"] = e.RetryAfter
+	}
+	return details
+}
+
+// AuthError is a token request the identity provider rejected — a wrong tenant,
+// client id, or secret. Permanent: retrying the same credentials cannot help.
+type AuthError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *AuthError) Error() string {
+	return fmt.Sprintf("token request rejected with HTTP %d: %s", e.StatusCode, e.Body)
+}
+
+// ErrorCode marks this as bad credentials rather than an unclassified failure.
+func (e *AuthError) ErrorCode() string { return output.CodeAuthFailed }
+
+// ErrorDetails points at the fix.
+func (e *AuthError) ErrorDetails() map[string]any {
+	return map[string]any{
+		"statusCode": e.StatusCode,
+		"remedy":     "pcenter auth login",
+	}
+}
+
 // NewClient validates options and constructs a client.
 func NewClient(options ClientOptions) (*Client, error) {
 	for name, value := range map[string]string{
@@ -107,6 +162,13 @@ func NewClient(options ClientOptions) (*Client, error) {
 		verboseLog:    options.VerboseLog,
 		redactor:      NewRedactor(options.ClientSecret),
 	}, nil
+}
+
+// VerifyCredentials acquires a token and discards it, proving the tenant,
+// client id and secret are usable without touching any app-scoped resource.
+func (c *Client) VerifyCredentials(ctx context.Context) error {
+	_, err := c.accessToken(ctx)
+	return err
 }
 
 // Application gets an application resource.
@@ -290,6 +352,12 @@ func (c *Client) send(ctx context.Context, method, requestURL string, body []byt
 	if closeErr := response.Body.Close(); closeErr != nil {
 		return response.StatusCode, response.Header.Clone(), nil, closeErr
 	}
+	// The response body, not the parsed struct: --verbose exists to show what
+	// the API actually sent, which is the only way to notice a field the client
+	// models but the Store never returns.
+	if c.verboseLog != nil {
+		c.verboseLog(c.redactor.Redact(fmt.Sprintf("%d %s %s\n%s", response.StatusCode, method, requestURL, responseBody)))
+	}
 	return response.StatusCode, response.Header.Clone(), responseBody, nil
 }
 
@@ -356,7 +424,10 @@ func (c *Client) accessToken(ctx context.Context) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("read token response: %w", err)
 		}
-		return "", fmt.Errorf("token request failed with HTTP %d: %s", response.StatusCode, c.redactor.Redact(string(responseBody)))
+		// A rejected credential is the case automation most needs to identify —
+		// it is permanent and the fix is human. Classify it rather than letting
+		// it fall through as a generic failure.
+		return "", &AuthError{StatusCode: response.StatusCode, Body: c.redactor.Redact(string(responseBody))}
 	}
 	return "", errors.New("token attempts exhausted")
 }

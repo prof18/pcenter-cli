@@ -45,6 +45,10 @@ type Dependencies struct {
 	HTTPClient  *http.Client
 	Clock       store.Clock
 	Rand        store.Rand
+	// PromptLine and PromptSecret are only ever called by `auth login`, and
+	// only when IsTTY. Injected so the prompting path is testable without a pty.
+	PromptLine   func(prompt string) (string, error)
+	PromptSecret func(prompt string) (string, error)
 }
 
 type commandState struct {
@@ -59,10 +63,35 @@ type commandState struct {
 	publisher    *submissionflow.Publisher
 	listingPush  *submissionflow.ListingPublisher
 	config       config.Config
+	// warnings accumulate so JSON output can carry them in the payload. Echoing
+	// them to stderr as prose too would make an agent reading both count each
+	// one twice, and one reading only stdout miss them entirely.
+	warnings []string
+}
+
+// warn records a warning, printing it immediately only for human output.
+func (s *commandState) warn(message string) {
+	s.warnings = append(s.warnings, message)
+	if s.format != output.JSON {
+		_, _ = fmt.Fprintln(s.dependencies.Stderr, "Warning:", message)
+	}
 }
 
 type usageError struct{ error }
 type failureError struct{ error }
+
+// warningsError carries warnings collected before a failure into the error
+// payload, so JSON callers see them without a second output channel.
+type warningsError struct {
+	error
+	warnings []string
+}
+
+func (e *warningsError) Unwrap() error { return e.error }
+
+func (e *warningsError) ErrorDetails() map[string]any {
+	return map[string]any{"warnings": e.warnings}
+}
 
 // Execute runs pcenter and returns a process exit code.
 func Execute(ctx context.Context, args []string, dependencies Dependencies) int {
@@ -84,6 +113,12 @@ func Execute(ctx context.Context, args []string, dependencies Dependencies) int 
 	if dependencies.Rand == nil {
 		dependencies.Rand = commandRand{}
 	}
+	if dependencies.PromptLine == nil {
+		dependencies.PromptLine = promptLine
+	}
+	if dependencies.PromptSecret == nil {
+		dependencies.PromptSecret = promptSecret
+	}
 	state := &commandState{dependencies: dependencies}
 	root := state.rootCommand()
 	root.SetArgs(args)
@@ -94,7 +129,21 @@ func Execute(ctx context.Context, args []string, dependencies Dependencies) int 
 		if formatErr != nil {
 			format = output.JSON
 		}
-		output.WriteError(dependencies.Stderr, format, unwrapCommandError(err))
+		inner := unwrapCommandError(err)
+		// On a failure path no result is rendered, so warnings collected during
+		// the attempt would otherwise be lost in JSON mode. Cleanup warnings —
+		// "could not delete the draft I just created" — are exactly the ones a
+		// caller must not miss.
+		if len(state.warnings) > 0 {
+			inner = &warningsError{error: inner, warnings: state.warnings}
+		}
+		output.WriteError(dependencies.Stderr, format, inner)
+		// A code carried by the underlying error decides the exit status, so
+		// automation can branch on $? alone: 3 auth, 4 permanent state
+		// conflict, 5 throttled. The usage/failure wrapper is the fallback.
+		if code := output.CodeOf(inner); code != "" {
+			return output.ExitCodeFor(code)
+		}
 		var failed failureError
 		if errors.As(err, &failed) {
 			return output.ExitFailure
@@ -136,7 +185,7 @@ func (s *commandState) rootCommand() *cobra.Command {
 
 func (s *commandState) listingCommand() *cobra.Command {
 	parent := &cobra.Command{Use: "listing", Short: "Manage Store listing metadata"}
-	parent.AddCommand(s.listingPullCommand(), s.listingPushCommand())
+	parent.AddCommand(s.listingShowCommand(), s.listingPullCommand(), s.listingPushCommand())
 	return parent
 }
 
@@ -375,23 +424,6 @@ func (s *commandState) versionCommand(build BuildInfo) *cobra.Command {
 	}
 }
 
-func (s *commandState) authCommand() *cobra.Command {
-	parent := &cobra.Command{Use: "auth", Short: "Check authentication"}
-	parent.AddCommand(&cobra.Command{
-		Use:   "status",
-		Short: "Acquire a token and fetch the configured app",
-		Args:  noArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			app, err := s.loadApplication(cmd.Context())
-			if err != nil {
-				return err
-			}
-			return s.renderApplicationSummary(app)
-		},
-	})
-	return parent
-}
-
 func (s *commandState) appCommand() *cobra.Command {
 	parent := &cobra.Command{Use: "app", Short: "Inspect the configured app"}
 	parent.AddCommand(&cobra.Command{
@@ -469,7 +501,7 @@ func (s *commandState) submissionStatusCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return s.renderApplicationSummary(app)
+			return s.renderSubmissionStatuses(cmd.Context(), app)
 		},
 	}
 }
@@ -538,14 +570,13 @@ func (s *commandState) submissionDeleteCommand() *cobra.Command {
 			if pending == nil {
 				return failureError{errors.New("application has no pending submission")}
 			}
-			status := pending.Status
-			if status == "" {
-				submission, getErr := s.client.Submission(cmd.Context(), s.config.AppID, pending.ID)
-				if getErr != nil {
-					return failureError{getErr}
-				}
-				status = submission.Status
+			// The application resource carries no status, so the guard has to
+			// read the submission itself before deleting anything.
+			submission, getErr := s.client.Submission(cmd.Context(), s.config.AppID, pending.ID)
+			if getErr != nil {
+				return failureError{getErr}
 			}
+			status := submission.Status
 			if status != "PendingCommit" {
 				return failureError{fmt.Errorf("refusing to delete submission %s in status %s; only PendingCommit drafts can be deleted", pending.ID, status)}
 			}
@@ -960,7 +991,7 @@ func (s *commandState) preparePublisher() error {
 	}
 	publisher, err := submissionflow.NewPublisher(submissionflow.PublisherOptions{
 		Client: s.client, Manager: s.manager, Uploader: submissionflow.NewAzureBlobUploader(),
-		Warn: func(message string) { _, _ = fmt.Fprintln(s.dependencies.Stderr, "Warning:", message) },
+		Warn: s.warn,
 	})
 	if err != nil {
 		return failureError{err}
@@ -978,7 +1009,7 @@ func (s *commandState) prepareListingPublisher() error {
 	}
 	publisher, err := submissionflow.NewListingPublisher(submissionflow.ListingPublisherOptions{
 		Client: s.client, Manager: s.manager, Uploader: submissionflow.NewAzureBlobUploader(),
-		Warn: func(message string) { _, _ = fmt.Fprintln(s.dependencies.Stderr, "Warning:", message) },
+		Warn: s.warn,
 	})
 	if err != nil {
 		return failureError{err}
@@ -996,26 +1027,75 @@ func (s *commandState) prepareOutput() error {
 	return nil
 }
 
+// renderApplicationSummary shows what the application resource actually
+// contains. It deliberately does not show submission statuses: the app resource
+// carries only submission ids, so a STATUS column here could only ever be
+// blank. `submission status` fetches the real thing.
 func (s *commandState) renderApplicationSummary(app storetypes.Application) error {
-	type summary struct {
-		ID        string                          `json:"id"`
-		Name      string                          `json:"name"`
-		Published *storetypes.SubmissionReference `json:"published,omitempty"`
-		Pending   *storetypes.SubmissionReference `json:"pending,omitempty"`
-	}
-	value := summary{ID: app.ID, Name: app.Name, Published: app.LastPublishedApplicationSubmission, Pending: app.PendingApplicationSubmission}
 	renderer := output.NewRenderer(s.dependencies.Stdout, s.format)
 	if s.format == output.JSON {
-		return wrapFailure(renderer.Value(value))
+		return wrapFailure(renderer.Value(app))
 	}
-	rows := make([][]string, 0, 2)
-	if value.Published != nil {
-		rows = append(rows, []string{"published", value.Published.ID, value.Published.Status, string(value.Published.StatusDetails)})
+	rows := [][]string{
+		{"id", app.ID},
+		{"name", app.PrimaryName},
+		{"package family", app.PackageFamilyName},
+		{"package identity", app.PackageIdentityName},
+		{"publisher", app.PublisherName},
+		{"first published", app.FirstPublishedDate},
+		{"advanced listing", strconv.FormatBool(app.HasAdvancedListingPermission)},
+		{"published submission", submissionRefID(app.LastPublishedApplicationSubmission)},
+		{"pending submission", submissionRefID(app.PendingApplicationSubmission)},
 	}
-	if value.Pending != nil {
-		rows = append(rows, []string{"pending", value.Pending.ID, value.Pending.Status, string(value.Pending.StatusDetails)})
+	return wrapFailure(renderer.Rows([]string{"FIELD", "VALUE"}, rows))
+}
+
+// renderSubmissionStatuses resolves each referenced submission's real status,
+// which costs one request per submission but is the only way to get it.
+func (s *commandState) renderSubmissionStatuses(ctx context.Context, app storetypes.Application) error {
+	type entry struct {
+		Type          string          `json:"type"`
+		ID            string          `json:"id"`
+		Status        string          `json:"status,omitempty"`
+		StatusDetails json.RawMessage `json:"statusDetails,omitempty"`
+	}
+	entries := make([]entry, 0, 2)
+	for _, candidate := range []struct {
+		label string
+		ref   *storetypes.SubmissionReference
+	}{
+		{"published", app.LastPublishedApplicationSubmission},
+		{"pending", app.PendingApplicationSubmission},
+	} {
+		if candidate.ref == nil {
+			continue
+		}
+		status, err := s.client.SubmissionStatus(ctx, s.config.AppID, candidate.ref.ID)
+		if err != nil {
+			return failureError{fmt.Errorf("get %s submission status: %w", candidate.label, err)}
+		}
+		entries = append(entries, entry{
+			Type: candidate.label, ID: candidate.ref.ID,
+			Status: status.Status, StatusDetails: status.StatusDetails,
+		})
+	}
+
+	renderer := output.NewRenderer(s.dependencies.Stdout, s.format)
+	if s.format == output.JSON {
+		return wrapFailure(renderer.Value(entries))
+	}
+	rows := make([][]string, 0, len(entries))
+	for _, item := range entries {
+		rows = append(rows, []string{item.Type, item.ID, item.Status, string(item.StatusDetails)})
 	}
 	return wrapFailure(renderer.Rows([]string{"TYPE", "ID", "STATUS", "DETAILS"}, rows))
+}
+
+func submissionRefID(ref *storetypes.SubmissionReference) string {
+	if ref == nil {
+		return "-"
+	}
+	return ref.ID
 }
 
 func (s *commandState) renderReviews(rawReviews []json.RawMessage) error {

@@ -65,8 +65,8 @@ func listingPullServer(t *testing.T) *fakestore.Server {
 	return fakestore.New(t, fakestore.Options{
 		AppID: "APP",
 		App: fakestore.App{
-			ID: "APP", LastPublishedApplicationSubmission: &fakestore.SubmissionRef{ID: "published", Status: "Published"},
-			PendingApplicationSubmission: &fakestore.SubmissionRef{ID: "pending", Status: "PendingCommit"},
+			ID: "APP", LastPublishedApplicationSubmission: &fakestore.SubmissionRef{ID: "published"},
+			PendingApplicationSubmission: &fakestore.SubmissionRef{ID: "pending"},
 		},
 		Submissions: map[string]json.RawMessage{
 			"published": json.RawMessage(`{"id":"published","status":"Published","listings":{"en-us":{"baseListing":{"title":"Published","description":"Description","features":[],"keywords":[],"recommendedHardware":[],"minimumHardware":[],"releaseNotes":"old","images":[{"fileName":"legacy.png","fileStatus":"Uploaded","id":"image","description":"Screenshot","imageType":"Screenshot"}]}}}}`),

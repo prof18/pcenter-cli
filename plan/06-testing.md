@@ -35,3 +35,12 @@ Read-only commands only — `auth status`, `app info`, `locales list`, `reviews 
 ## CI
 
 GitHub Actions matrix: ubuntu + macos + windows. `go test ./...` + `golangci-lint`. Release workflow runs goreleaser on tags. Actions pinned to SHAs, minimal permissions (doc 02 §Supply-chain).
+
+## Fixtures must match the real API
+
+The fakestore originally modelled an application as `{name, lastPublishedApplicationSubmission: {id, status}}`. The live API returns neither of those field names: it is `primaryName`, and submission references carry no status at all. Tests passed for months against a shape the Store never sends, while `app info` printed a blank name and `submission status` printed blank statuses (found 2026-08-06, doc 04).
+
+Two rules follow:
+
+- **Capture a real response before modelling it.** `--verbose` logs response bodies for this reason; a field nobody has seen the Store send is a guess.
+- **Tests must not read the developer's own credentials.** The CLI test harness pins `PCENTER_ENV_FILE` at an empty temp file, because a test that passes no environment otherwise falls back to `~/.config/pcenter/credentials.env` and talks to the live Store. That was harmless only while nobody had such a file; `auth login` changed that, and one test was silently hitting the real API before the harness was fixed.

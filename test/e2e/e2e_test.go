@@ -122,8 +122,8 @@ func e2eServer(t *testing.T) *fakestore.Server {
 		AppID: "APP",
 		App: fakestore.App{
 			ID:                                 "APP",
-			Name:                               "Example",
-			LastPublishedApplicationSubmission: &fakestore.SubmissionRef{ID: "published", Status: "Published"},
+			PrimaryName:                        "Example",
+			LastPublishedApplicationSubmission: &fakestore.SubmissionRef{ID: "published"},
 		},
 		Submissions: map[string]json.RawMessage{
 			"published": json.RawMessage(`{

@@ -17,6 +17,13 @@ const (
 	ExitFailure = 1
 	// ExitUsage indicates invalid CLI usage or missing configuration.
 	ExitUsage = 2
+	// ExitAuth indicates credentials the Store rejected.
+	ExitAuth = 3
+	// ExitStateConflict indicates an operation invalid for the current state
+	// (HTTP 409). Permanent: retrying unchanged cannot succeed.
+	ExitStateConflict = 4
+	// ExitRateLimited indicates throttling that outlasted the retry budget.
+	ExitRateLimited = 5
 )
 
 // Format is a supported CLI output representation.
@@ -101,8 +108,28 @@ func (r Renderer) Rows(headers []string, rows [][]string) error {
 // WriteError follows the one-line JSON convention when JSON output is selected.
 func WriteError(writer io.Writer, format Format, err error) {
 	if format == JSON {
-		_ = json.NewEncoder(writer).Encode(map[string]string{"error": err.Error()})
+		// A one-line message plus structured fields. The multi-line guidance a
+		// human wants is prose an agent would have to parse, so it stays in
+		// table mode; anything a caller needs to act on is a field.
+		payload := map[string]any{"message": summarize(err.Error())}
+		if code := CodeOf(err); code != "" {
+			payload["code"] = code
+		} else {
+			payload["code"] = CodeFailure
+		}
+		for key, value := range DetailsOf(err) {
+			payload[key] = value
+		}
+		_ = json.NewEncoder(writer).Encode(map[string]any{"error": payload})
 		return
 	}
 	_, _ = fmt.Fprintln(writer, "Error:", err)
+}
+
+// summarize reduces a multi-line message to its first line.
+func summarize(message string) string {
+	if index := strings.IndexByte(message, '\n'); index >= 0 {
+		return strings.TrimSpace(message[:index])
+	}
+	return message
 }

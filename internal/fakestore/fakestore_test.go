@@ -19,9 +19,9 @@ func TestServerExposesTokenAndReadOnlyStoreEndpoints(t *testing.T) {
 		AppID: "APP",
 		App: fakestore.App{
 			ID:                                 "APP",
-			Name:                               "Example",
-			LastPublishedApplicationSubmission: &fakestore.SubmissionRef{ID: "published", Status: "Published"},
-			PendingApplicationSubmission:       &fakestore.SubmissionRef{ID: "pending", Status: "PendingCommit"},
+			PrimaryName:                        "Example",
+			LastPublishedApplicationSubmission: &fakestore.SubmissionRef{ID: "published"},
+			PendingApplicationSubmission:       &fakestore.SubmissionRef{ID: "pending"},
 		},
 		Submissions: map[string]json.RawMessage{
 			"pending": json.RawMessage(`{"id":"pending","status":"PendingCommit","fileUploadUrl":"https://blob.invalid/upload?sig=secret"}`),

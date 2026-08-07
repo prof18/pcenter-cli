@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
-	"sort"
 	"strings"
 )
 
@@ -53,53 +51,42 @@ func CurrentEnvironment() Environment {
 
 // Resolve applies flag, environment, then env-file precedence and validates credentials.
 func Resolve(overrides Overrides, environment Environment) (Config, error) {
-	home, err := os.UserHomeDir()
+	report, err := Inspect(overrides, environment)
 	if err != nil {
-		return Config{}, fmt.Errorf("resolve home directory: %w", err)
-	}
-	defaultEnvFile := filepath.Join(home, ".config", "pcenter", "credentials.env")
-	envFile := firstNonEmpty(overrides.EnvFile, environment["PCENTER_ENV_FILE"], defaultEnvFile)
-	explicitEnvFile := overrides.EnvFile != "" || environment["PCENTER_ENV_FILE"] != ""
-
-	fileValues, err := parseEnvFile(envFile)
-	if err != nil {
-		if explicitEnvFile || !errors.Is(err, os.ErrNotExist) {
-			return Config{}, err
-		}
-		fileValues = Environment{}
-	}
-
-	config := Config{
-		TenantID:     firstNonEmpty(overrides.TenantID, environment["MS_STORE_TENANT_ID"], fileValues["MS_STORE_TENANT_ID"]),
-		ClientID:     firstNonEmpty(overrides.ClientID, environment["MS_STORE_CLIENT_ID"], fileValues["MS_STORE_CLIENT_ID"]),
-		ClientSecret: firstNonEmpty(overrides.ClientSecret, environment["MS_STORE_CLIENT_SECRET"], fileValues["MS_STORE_CLIENT_SECRET"]),
-		AppID:        firstNonEmpty(overrides.AppID, environment["MS_STORE_APP_ID"], fileValues["MS_STORE_APP_ID"]),
-		EnvFile:      envFile,
-		APIBase:      firstNonEmpty(environment["PCENTER_API_BASE"], defaultAPIBase),
-		LoginBase:    firstNonEmpty(environment["PCENTER_LOGIN_BASE"], defaultLoginBase),
-	}
-	if err := config.Validate(); err != nil {
 		return Config{}, err
 	}
-	return config, nil
+	// An operational command told to read a specific file should say so when
+	// that file is not there, rather than silently falling back and failing
+	// later on a missing credential.
+	if report.EnvFileExplicit && !report.EnvFileExists {
+		return Config{}, &EnvFileError{Path: report.EnvFile, Reason: os.ErrNotExist}
+	}
+	if missing := report.Missing(AllNames); len(missing) > 0 {
+		return Config{}, &MissingConfigError{
+			Missing:       missing,
+			EnvFile:       report.EnvFile,
+			EnvFileExists: report.EnvFileExists,
+		}
+	}
+	return report.Config, nil
 }
 
 // Validate reports all missing credential names without revealing values.
 func (c Config) Validate() error {
-	missing := make([]string, 0, 4)
-	for name, value := range map[string]string{
-		"MS_STORE_TENANT_ID":     c.TenantID,
-		"MS_STORE_CLIENT_ID":     c.ClientID,
-		"MS_STORE_CLIENT_SECRET": c.ClientSecret,
-		"MS_STORE_APP_ID":        c.AppID,
-	} {
-		if strings.TrimSpace(value) == "" {
+	missing := make([]string, 0, len(AllNames))
+	values := map[string]string{
+		TenantIDName:     c.TenantID,
+		ClientIDName:     c.ClientID,
+		ClientSecretName: c.ClientSecret,
+		AppIDName:        c.AppID,
+	}
+	for _, name := range AllNames {
+		if strings.TrimSpace(values[name]) == "" {
 			missing = append(missing, name)
 		}
 	}
 	if len(missing) > 0 {
-		sort.Strings(missing)
-		return fmt.Errorf("missing required configuration: %s", strings.Join(missing, ", "))
+		return &MissingConfigError{Missing: missing, EnvFile: c.EnvFile}
 	}
 	return nil
 }

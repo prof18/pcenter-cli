@@ -21,6 +21,8 @@ Single entrypoint for implementing `pcenter`, the Microsoft Partner Center CLI f
 | [05-metadata-directory.md](05-metadata-directory.md) | File-based listing/screenshot metadata format and pull/push diff semantics |
 | [06-testing.md](06-testing.md) | Fakestore design, test layers, parity tests, live smoke rules |
 | [07-feedflow-integration.md](07-feedflow-integration.md) | How feed-flow adopts the CLI and the CI swap that retires the PowerShell scripts |
+| [08-release-testing.md](08-release-testing.md) | How the release pipeline and Homebrew tap get proven before the first tag |
+| [09-manual-live-testing.md](09-manual-live-testing.md) | By-hand sweep of every command and path against the real FeedFlow Store app |
 | [TODO.md](TODO.md) | Milestones M1–M5 with tasks, acceptance criteria, and open items to verify against the live API |
 
 ## Feature coverage map (original goals → commands)

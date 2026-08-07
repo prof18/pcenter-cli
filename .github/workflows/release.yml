@@ -1,0 +1,141 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # to create the release and upload the archives
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      # Two archive formats because there are two consumers: the Homebrew tap
+      # takes the darwin/linux tarballs, and feed-flow's Windows release job
+      # takes the zip by pinned URL. Homebrew has no Windows channel, so that
+      # download cannot be replaced by the tap.
+      - name: Build every platform
+        env:
+          VERSION: ${{ github.ref_name }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          built_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          # Stamped explicitly rather than left to Go's VCS metadata: Homebrew
+          # builds nothing, but anyone running `go build` from an extracted
+          # source archive has no .git, and `pcenter version` must agree with
+          # the release it came from wherever it was built.
+          flags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.buildDate=${built_at}"
+
+          for target in darwin/arm64 darwin/amd64 linux/arm64 linux/amd64 windows/amd64; do
+            os="${target%/*}"; arch="${target#*/}"
+            echo "building ${os}/${arch}"
+            binary="pcenter"
+            [ "$os" = "windows" ] && binary="pcenter.exe"
+
+            CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
+              go build -trimpath -ldflags "$flags" -o "dist/${binary}" ./cmd/pcenter
+
+            # Archive names must stay `pcenter_<tag>_<os>_<arch>.<ext>`: the
+            # tap's update-formula.py reads the platform back out of the
+            # filename it finds in the formula.
+            if [ "$os" = "windows" ]; then
+              (cd dist && zip -q "pcenter_${VERSION}_${os}_${arch}.zip" "$binary")
+            else
+              tar -czf "dist/pcenter_${VERSION}_${os}_${arch}.tar.gz" -C dist "$binary"
+            fi
+            rm "dist/${binary}"
+          done
+
+          cd dist && shasum -a 256 *.tar.gz *.zip > checksums.txt
+          cat checksums.txt
+
+      # A release binary that does not work is worse than no release. Prove the
+      # artifact itself, not the tree it was built from — CI already tested that.
+      #
+      # The version assertion is not ceremony: `-X` against a symbol that does
+      # not exist is silently ignored, so renaming or moving main.version would
+      # ship releases reporting "dev" with nothing failing. This is the only
+      # thing that catches it.
+      - name: Smoke-test the artifact
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/bin"
+          tar -xzf "dist/pcenter_${VERSION}_linux_amd64.tar.gz" -C "$RUNNER_TEMP/bin"
+          export PATH="$RUNNER_TEMP/bin:$PATH"
+
+          got="$(pcenter version --output json | sed -n 's/.*"version":"\([^"]*\)".*/\1/p')"
+          echo "reports: $got"
+          [ "$got" = "$VERSION" ] || { echo "version mismatch: want $VERSION"; exit 1; }
+
+          # Credentials the binary will never get to use: everything below is
+          # rejected before the first request. Set so that credential
+          # resolution, which runs first, is not what fails.
+          export MS_STORE_APP_ID=000000000000 MS_STORE_CLIENT_ID=ci \
+                 MS_STORE_CLIENT_SECRET=ci MS_STORE_TENANT_ID=ci
+          # If any of these did reach the network, it would hit a closed port
+          # rather than the real Store.
+          export PCENTER_API_BASE=http://127.0.0.1:9 PCENTER_LOGIN_BASE=http://127.0.0.1:9
+
+          # `listing push` must refuse to run without exactly one mode flag.
+          set +e
+          pcenter listing push --dir "$RUNNER_TEMP" --dry-run --yes 2>"$RUNNER_TEMP/err"; code=$?
+          set -e
+          cat "$RUNNER_TEMP/err"
+          [ "$code" = "2" ] || { echo "want usage exit 2, got $code"; exit 1; }
+
+          # The identity guard: a directory with no store.json is not a
+          # metadata dir for this app, and that is decided locally.
+          set +e
+          pcenter listing push --dir "$RUNNER_TEMP" --dry-run 2>"$RUNNER_TEMP/err"; code=$?
+          set -e
+          cat "$RUNNER_TEMP/err"
+          [ "$code" = "1" ] || { echo "want failure exit 1, got $code"; exit 1; }
+          grep -q "store.json" "$RUNNER_TEMP/err" || { echo "expected the store.json guard"; exit 1; }
+
+      # A release publishes what CHANGELOG.md says about it, and will not publish
+      # without it. Generated commit lists are written for whoever maintains the
+      # code and read as noise to everyone else — and the release page is where
+      # people land, most of whom will never open the repository.
+      - name: Take the notes from the changelog
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          section="${VERSION#v}"
+          awk -v want="## $section" '
+            $0 == want { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+
+          if [ ! -s "$RUNNER_TEMP/notes.md" ]; then
+            echo "CHANGELOG.md has no '## $section' section."
+            echo "Add one describing what changed for someone using this, then re-tag."
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/notes.md"
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          gh release create "$VERSION" dist/pcenter_*.tar.gz dist/pcenter_*.zip dist/checksums.txt \
+            --title "$VERSION" \
+            --notes-file "$RUNNER_TEMP/notes.md"

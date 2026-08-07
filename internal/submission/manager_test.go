@@ -285,7 +285,7 @@ func rolloutServer(t *testing.T, scenario fakestore.MutationScenario) *fakestore
 	t.Helper()
 	return fakestore.New(t, fakestore.Options{
 		AppID:            "APP",
-		App:              fakestore.App{ID: "APP", LastPublishedApplicationSubmission: &fakestore.SubmissionRef{ID: "published", Status: "Published"}},
+		App:              fakestore.App{ID: "APP", LastPublishedApplicationSubmission: &fakestore.SubmissionRef{ID: "published"}},
 		Submissions:      map[string]json.RawMessage{"published": json.RawMessage(`{"id":"published","status":"Published"}`)},
 		Rollouts:         map[string]fakestore.Rollout{"published": {IsPackageRollout: true, PackageRolloutPercentage: 90, PackageRolloutStatus: "PackageRolloutInProgress"}},
 		FinalizeScenario: scenario,
@@ -296,7 +296,7 @@ func draftServer(t *testing.T, deleteScenario, commitScenario fakestore.Mutation
 	t.Helper()
 	return fakestore.New(t, fakestore.Options{
 		AppID:          "APP",
-		App:            fakestore.App{ID: "APP", PendingApplicationSubmission: &fakestore.SubmissionRef{ID: "draft", Status: "PendingCommit"}},
+		App:            fakestore.App{ID: "APP", PendingApplicationSubmission: &fakestore.SubmissionRef{ID: "draft"}},
 		Submissions:    map[string]json.RawMessage{"draft": json.RawMessage(`{"id":"draft","status":"PendingCommit"}`)},
 		DeleteScenario: deleteScenario, CommitScenario: commitScenario, CommitStatuses: statuses, CommitStatusDetails: details,
 	})

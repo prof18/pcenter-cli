@@ -43,7 +43,7 @@ func TestClientRetriesTokenHonorsRetryAfterAndRefreshesOnceOn401(t *testing.T) {
 	t.Parallel()
 	server := fakestore.New(t, fakestore.Options{
 		AppID: "APP",
-		App:   fakestore.App{ID: "APP", Name: "Example"},
+		App:   fakestore.App{ID: "APP", PrimaryName: "Example"},
 		Failures: []fakestore.Failure{
 			{Method: http.MethodPost, Path: "/tenant/oauth2/token", Status: http.StatusTooManyRequests, RetryAfter: "17", Count: 1},
 			{Method: http.MethodGet, Path: "/v1.0/my/applications/APP", Status: http.StatusUnauthorized, Count: 1},
@@ -56,8 +56,8 @@ func TestClientRetriesTokenHonorsRetryAfterAndRefreshesOnceOn401(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if app.Name != "Example" {
-		t.Fatalf("app name = %q", app.Name)
+	if app.PrimaryName != "Example" {
+		t.Fatalf("app name = %q", app.PrimaryName)
 	}
 	if got := clock.Sleeps(); len(got) != 1 || got[0] != 17*time.Second {
 		t.Fatalf("sleeps = %v, want [17s]", got)
@@ -147,7 +147,7 @@ func TestClientReadsSubmissionRolloutAndReviews(t *testing.T) {
 		AppID: "APP",
 		App: fakestore.App{
 			ID:                                 "APP",
-			LastPublishedApplicationSubmission: &fakestore.SubmissionRef{ID: "published", Status: "Published"},
+			LastPublishedApplicationSubmission: &fakestore.SubmissionRef{ID: "published"},
 		},
 		Submissions: map[string]json.RawMessage{"published": json.RawMessage(`{"id":"published","status":"Published"}`)},
 		Rollouts: map[string]fakestore.Rollout{

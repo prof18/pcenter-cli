@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -38,9 +40,11 @@ func TestReadOnlyCommandsAgainstFakeStore(t *testing.T) {
 		contains []string
 	}{
 		{args: []string{"app", "info"}, contains: []string{"Example", "published", "pending"}},
-		{args: []string{"auth", "status"}, contains: []string{"Example", "Published", "PendingCommit"}},
+		// Statuses come from the submissions themselves; the app resource has none.
+		{args: []string{"submission", "status"}, contains: []string{"published", "pending", "Published", "PendingCommit", "warning"}},
+		// So auth status reports the app plus where credentials resolved from.
+		{args: []string{"auth", "status"}, contains: []string{"Example", "envFile", "sources"}},
 		{args: []string{"locales", "list"}, contains: []string{"en-us", "it"}},
-		{args: []string{"submission", "status"}, contains: []string{"published", "pending", "warning"}},
 		{args: []string{"rollout", "status"}, contains: []string{"PackageRolloutInProgress", "fallback", "90"}},
 	} {
 		stdout, stderr, exitCode := execute(t, environment, append([]string{"--output", "json"}, test.args...), cli.BuildInfo{})
@@ -125,6 +129,7 @@ func TestUsageErrorsExitTwoAsJSON(t *testing.T) {
 
 func execute(t *testing.T, environment config.Environment, args []string, build cli.BuildInfo) (string, string, int) {
 	t.Helper()
+	environment = hermetic(t, environment)
 	var stdout, stderr bytes.Buffer
 	exitCode := cli.Execute(context.Background(), args, cli.Dependencies{
 		Stdout:      &stdout,
@@ -137,6 +142,26 @@ func execute(t *testing.T, environment config.Environment, args []string, build 
 		Rand:        cliFixedRand(1),
 	})
 	return stdout.String(), stderr.String(), exitCode
+}
+
+// hermetic keeps a test off the developer's real credentials file. Without it a
+// test passing no environment falls back to ~/.config/pcenter/credentials.env
+// and, if one exists, talks to the live Store — which is exactly what happened
+// once `auth login` gave people a reason to have that file.
+func hermetic(t *testing.T, environment config.Environment) config.Environment {
+	t.Helper()
+	result := config.Environment{}
+	for key, value := range environment {
+		result[key] = value
+	}
+	if result["PCENTER_ENV_FILE"] == "" {
+		empty := filepath.Join(t.TempDir(), "credentials.env")
+		if err := os.WriteFile(empty, []byte("# intentionally empty\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		result["PCENTER_ENV_FILE"] = empty
+	}
+	return result
 }
 
 type instantClock struct{}
@@ -154,9 +179,9 @@ func fullServer(t *testing.T) *fakestore.Server {
 		AppID: "APP",
 		App: fakestore.App{
 			ID:                                 "APP",
-			Name:                               "Example",
-			LastPublishedApplicationSubmission: &fakestore.SubmissionRef{ID: "published", Status: "Published"},
-			PendingApplicationSubmission:       &fakestore.SubmissionRef{ID: "pending", Status: "PendingCommit", StatusDetails: json.RawMessage(`{"warnings":["warning"]}`)},
+			PrimaryName:                        "Example",
+			LastPublishedApplicationSubmission: &fakestore.SubmissionRef{ID: "published"},
+			PendingApplicationSubmission:       &fakestore.SubmissionRef{ID: "pending"},
 		},
 		Submissions: map[string]json.RawMessage{
 			"published": json.RawMessage(`{"id":"published","status":"Published","listings":{"en-us":{"baseListing":{}},"it":{"baseListing":{}}}}`),

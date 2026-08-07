@@ -15,16 +15,25 @@ import (
 )
 
 // SubmissionRef is the submission summary embedded in an application.
+//
+// Only an id and a resource location, matching the live API — it deliberately
+// carries no status. Modelling a status here previously let the CLI render a
+// STATUS column that could only ever be blank against the real Store.
 type SubmissionRef struct {
-	ID            string          `json:"id"`
-	Status        string          `json:"status,omitempty"`
-	StatusDetails json.RawMessage `json:"statusDetails,omitempty"`
+	ID               string `json:"id"`
+	ResourceLocation string `json:"resourceLocation,omitempty"`
 }
 
-// App models the fields of an application used by pcenter.
+// App models the fields of an application used by pcenter, with the field
+// names the live API really uses (captured from FeedFlow on 2026-08-06).
 type App struct {
 	ID                                 string         `json:"id"`
-	Name                               string         `json:"name,omitempty"`
+	PrimaryName                        string         `json:"primaryName,omitempty"`
+	PackageFamilyName                  string         `json:"packageFamilyName,omitempty"`
+	PackageIdentityName                string         `json:"packageIdentityName,omitempty"`
+	PublisherName                      string         `json:"publisherName,omitempty"`
+	FirstPublishedDate                 string         `json:"firstPublishedDate,omitempty"`
+	HasAdvancedListingPermission       bool           `json:"hasAdvancedListingPermission,omitempty"`
 	LastPublishedApplicationSubmission *SubmissionRef `json:"lastPublishedApplicationSubmission,omitempty"`
 	PendingApplicationSubmission       *SubmissionRef `json:"pendingApplicationSubmission,omitempty"`
 }
@@ -90,6 +99,9 @@ type Options struct {
 	DeleteScenario      MutationScenario
 	BlobEnabled         bool
 	BlobForbiddenCount  int
+	// RejectToken makes the token endpoint answer as Azure AD does for a bad
+	// client secret: 400 invalid_client, which is permanent and must not retry.
+	RejectToken bool
 }
 
 // Request is a sanitized journal entry. It records presence, never credential values.
@@ -199,6 +211,13 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodPut && r.URL.Path == "/blob/upload.zip":
 		s.handleBlobUpload(w, body)
 	case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/oauth2/token"):
+		if s.options.RejectToken {
+			writeJSON(w, http.StatusBadRequest, map[string]any{
+				"error":             "invalid_client",
+				"error_description": "AADSTS7000215: Invalid client secret provided.",
+			})
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]any{"access_token": s.options.AccessToken, "token_type": "Bearer", "expires_in": 3600})
 	case r.Method == http.MethodGet && r.URL.Path == "/v1.0/my/applications/"+s.options.AppID:
 		s.mu.Lock()
@@ -330,7 +349,12 @@ func (s *Server) handleSubmissionStatus(w http.ResponseWriter, id string) {
 			s.statusQueue[id] = queue[1:]
 		}
 	}
+	// The real endpoint returns the submission's own statusDetails; the option
+	// is only an override for scripted commit scenarios.
 	details := s.options.CommitStatusDetails
+	if len(details) == 0 {
+		details = submissionStatusDetails(raw)
+	}
 	if len(details) == 0 {
 		details = json.RawMessage(`{}`)
 	}
@@ -359,7 +383,7 @@ func (s *Server) handleCreate(w http.ResponseWriter) {
 			raw = withRawField(raw, "fileUploadUrl", s.blobURL())
 		}
 		s.submissions[id] = raw
-		s.app.PendingApplicationSubmission = &SubmissionRef{ID: id, Status: "PendingCommit"}
+		s.app.PendingApplicationSubmission = &SubmissionRef{ID: id}
 	}
 	if status, failed := applyScenario(&s.create, apply); failed {
 		writeMutationFailure(w, status)
@@ -503,9 +527,6 @@ func (s *Server) handleCommit(w http.ResponseWriter, id string) {
 		}
 		s.statusQueue[id] = statuses
 		s.submissions[id] = withSubmissionStatus(raw, statuses[0])
-		if s.app.PendingApplicationSubmission != nil && s.app.PendingApplicationSubmission.ID == id {
-			s.app.PendingApplicationSubmission.Status = statuses[0]
-		}
 	}
 	if status, failed := applyScenario(&s.commit, apply); failed {
 		writeMutationFailure(w, status)
@@ -572,6 +593,14 @@ func submissionStatus(raw json.RawMessage) string {
 	}
 	_ = json.Unmarshal(raw, &value)
 	return value.Status
+}
+
+func submissionStatusDetails(raw json.RawMessage) json.RawMessage {
+	var value struct {
+		StatusDetails json.RawMessage `json:"statusDetails"`
+	}
+	_ = json.Unmarshal(raw, &value)
+	return value.StatusDetails
 }
 
 func withSubmissionStatus(raw json.RawMessage, status string) json.RawMessage {

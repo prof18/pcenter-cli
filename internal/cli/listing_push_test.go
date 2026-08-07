@@ -118,7 +118,7 @@ func listingPushServer(t *testing.T) (*fakestore.Server, json.RawMessage) {
 	server := fakestore.New(t, fakestore.Options{
 		AppID: "APP",
 		App: fakestore.App{ID: "APP", LastPublishedApplicationSubmission: &fakestore.SubmissionRef{
-			ID: "published", Status: "Published",
+			ID: "published",
 		}},
 		Submissions:        map[string]json.RawMessage{"published": submission},
 		CreateSubmissionID: "created", CreateSubmission: submission,

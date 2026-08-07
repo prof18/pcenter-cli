@@ -4,16 +4,29 @@ package types
 import "encoding/json"
 
 // SubmissionReference is embedded in an application response.
+//
+// It carries no status: the application resource returns only an id and a
+// resource location for each submission, so a status has to come from the
+// submission itself. Verified against the live API on 2026-08-06.
 type SubmissionReference struct {
-	ID            string          `json:"id"`
-	Status        string          `json:"status,omitempty"`
-	StatusDetails json.RawMessage `json:"statusDetails,omitempty"`
+	ID               string `json:"id"`
+	ResourceLocation string `json:"resourceLocation,omitempty"`
 }
 
 // Application is the app resource returned by Partner Center.
+//
+// The display name is `primaryName`, not `name` — modelling it as `name` meant
+// every command printed a blank app name. `PackageFamilyName` really is
+// capitalised that way in the response; Go's decoder matches case-insensitively
+// so the tag works either way, but it is not a typo.
 type Application struct {
 	ID                                 string               `json:"id"`
-	Name                               string               `json:"name,omitempty"`
+	PrimaryName                        string               `json:"primaryName,omitempty"`
+	PackageFamilyName                  string               `json:"packageFamilyName,omitempty"`
+	PackageIdentityName                string               `json:"packageIdentityName,omitempty"`
+	PublisherName                      string               `json:"publisherName,omitempty"`
+	FirstPublishedDate                 string               `json:"firstPublishedDate,omitempty"`
+	HasAdvancedListingPermission       bool                 `json:"hasAdvancedListingPermission,omitempty"`
 	LastPublishedApplicationSubmission *SubmissionReference `json:"lastPublishedApplicationSubmission,omitempty"`
 	PendingApplicationSubmission       *SubmissionReference `json:"pendingApplicationSubmission,omitempty"`
 }
