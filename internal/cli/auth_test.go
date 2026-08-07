@@ -346,14 +346,41 @@ func TestExplicitlyNamedMissingEnvFileSaysHowToCreateIt(t *testing.T) {
 	// Pointing at a file that is not there stays an error rather than silently
 	// falling back, but it should now say what to do about it — and carry a
 	// code distinct from "credentials missing", because the fix differs.
-	for _, expected := range []string{envFile, "auth login"} {
-		if !strings.Contains(stderr, expected) {
-			t.Fatalf("error should mention %q: %s", expected, stderr)
-		}
+	//
+	// Asserted on the decoded fields rather than the raw text: a Windows path
+	// is full of backslashes, and JSON escapes every one of them, so a
+	// substring match against the encoded output fails there for a payload
+	// that is entirely correct.
+	var payload struct {
+		Error struct {
+			Code    string `json:"code"`
+			EnvFile string `json:"envFile"`
+			Remedy  string `json:"remedy"`
+		} `json:"error"`
 	}
-	_, jsonStderr, _ := execute(t, config.Environment{"PCENTER_ENV_FILE": envFile}, []string{"--output", "json", "app", "info"}, cli.BuildInfo{})
-	if !strings.Contains(jsonStderr, `"code":"`+output.CodeEnvFile+`"`) {
-		t.Fatalf("expected %s code: %s", output.CodeEnvFile, jsonStderr)
+	if err := json.Unmarshal([]byte(stderr), &payload); err != nil {
+		t.Fatalf("json error is not parseable: %s", stderr)
+	}
+	if payload.Error.Code != output.CodeEnvFile {
+		t.Fatalf("code = %q, want %q", payload.Error.Code, output.CodeEnvFile)
+	}
+	if payload.Error.EnvFile != envFile {
+		t.Fatalf("envFile = %q, want %q", payload.Error.EnvFile, envFile)
+	}
+	if !strings.Contains(payload.Error.Remedy, "auth login") {
+		t.Fatalf("remedy should name the fixing command: %q", payload.Error.Remedy)
+	}
+
+	// Table mode is where a human reads the path back, so check it there too —
+	// unescaped, and therefore safe to match literally on every platform.
+	_, tableStderr, tableExit := execute(t, config.Environment{"PCENTER_ENV_FILE": envFile}, []string{"--output", "table", "app", "info"}, cli.BuildInfo{})
+	if tableExit != output.ExitUsage {
+		t.Fatalf("table exit = %d, want %d", tableExit, output.ExitUsage)
+	}
+	for _, expected := range []string{envFile, "auth login"} {
+		if !strings.Contains(tableStderr, expected) {
+			t.Fatalf("table error should mention %q: %s", expected, tableStderr)
+		}
 	}
 }
 
