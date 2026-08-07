@@ -66,14 +66,32 @@ Acceptance:
 
 ## M5 — Release + feed-flow CI swap
 
-- [ ] **Maintainer step**: create the public GitHub repo (`pcenter-cli`) and push — Marco does this himself; everything below depends on it (CI matrix runs, goreleaser releases, feed-flow download)
+Distribution changed on 2026-08-03: goreleaser is out, replaced by a hand-rolled release workflow plus a Homebrew formula in `prof18/homebrew-tap` — same shape as `regesto`. Rationale and the artifact/consumer split are in [02-architecture.md](02-architecture.md) §Distribution.
+
+Repo-independent (can be authored before the repo exists):
+
+- [x] `CHANGELOG.md` with a `## 0.0.1` section — the release workflow reads notes from it and fails without one
+- [x] `.github/workflows/release.yml`: cross-compile darwin arm64/amd64 + linux arm64/amd64 (`.tar.gz`) and windows/amd64 (`.zip`), `-X main.version/commit/buildDate` ldflags, `checksums.txt`, artifact smoke test, CHANGELOG-gated `gh release create`
+- [x] `script/rehearse-release.sh` — runs the whole release locally except `gh release create`; all steps pass (2026-08-03)
+- [x] Pre-flight the tap without a release: `update-formula.py` works on a `pcenter` formula unmodified, and the formula installs + `brew test` passes against `file://` URLs (2026-08-03, [08-release-testing.md](08-release-testing.md))
+- [x] docs/: per-command reference (`COMMANDS.md`), metadata dir + release-notes format (`METADATA.md`), machine contract for agents (`AUTOMATION.md`), CI integration (`CI.md`), failure guide (`TROUBLESHOOTING.md`), index (`README.md`)
+- [x] README: rewritten public-facing — install via `brew install prof18/tap/pcenter`, the pinned-download + checksum path for CI lives in `docs/CI.md`
+
+Needs the repo to exist — test order and open questions in [08-release-testing.md](08-release-testing.md):
+
+- [ ] **Maintainer step**: create the public GitHub repo (`pcenter-cli`) and push — Marco does this himself; everything below depends on it
 - [ ] Verify the 3-OS CI matrix is green on GitHub (deferred from M1)
-- [ ] goreleaser config (darwin/arm64, windows/amd64, linux/amd64), version ldflags, checksums, release workflow on tag
-- [ ] Tag `v0.1.0`; README install instructions (pinned download + checksum)
-- [ ] docs/: per-command reference + metadata dir format
+- [ ] Walk the Tier 0 and Tier 1 sweep in [09-manual-live-testing.md](09-manual-live-testing.md) against FeedFlow; record results in its table
+- [ ] Tag `v0.0.1` — a real release, not an RC (maintainer direction 2026-08-07, rationale in [08-release-testing.md](08-release-testing.md) §"`v0.0.1` instead of a release candidate"); walk the five checks in §"What only a real release can prove"; confirm the release carries all five archives + `checksums.txt` and that the published binary reports the tagged version
+- [ ] Settle the remaining open question: where the windows zip gets smoke-tested (the pre-release question is moot — `v0.0.1` is a normal release)
+- [ ] `prof18/homebrew-tap`: add `Formula/pcenter.rb` (darwin+linux only — Homebrew has no Windows channel) and `.github/workflows/update-pcenter.yml`, both cloned from the regesto pair; `script/update-formula.py` is already tool-agnostic and needs no change
+- [ ] Formula `test do`: assert the stamped version, then two credential-free real-code paths — `listing push --dry-run --yes` (exit 2, mode enforcement) and `listing push --dry-run` on a dir with no `store.json` (exit 1, identity guard). Both fire before any network call
+- [ ] Tap README: add a `pcenter` section alongside `regesto`
+- [ ] Verify end to end: `brew install prof18/tap/pcenter` on a clean machine, then `pcenter version` reports the tagged version
 - [ ] feed-flow: seed metadata dir via `listing pull`, commit ([07-feedflow-integration.md](07-feedflow-integration.md) §1)
 - [ ] feed-flow: swap `windows-release.yml` to pinned `pcenter` (§3)
 - [ ] After first green real release: delete the 3 ps1 scripts + `list-microsoft-store-locales.sh`, update docs/CLAUDE.md (§4–5)
+- [ ] During that release, walk Tier 2 of [09-manual-live-testing.md](09-manual-live-testing.md) (commit, watch, rollout status/set-percentage/finalize) — the only paths that cannot be exercised on demand
 - [ ] After the first committed CLI-managed image exists, verify caption-only edits on an `Uploaded` image; fall back to replace if the API rejects them
 - [ ] Verify locale removal only when the maintainer explicitly authorizes deleting a Store listing locale
 
