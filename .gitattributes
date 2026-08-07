@@ -1,0 +1,8 @@
+# Go's formatters emit LF, and the Windows CI runner checks out with
+# core.autocrlf=true by default — so every .go file arrived as CRLF there and
+# failed gofmt while passing on Linux and macOS. (Only three files were listed
+# in the log because golangci-lint caps repeats of one issue at three.)
+#
+# Normalise to LF in the repository and check out LF everywhere. Nothing here
+# is consumed by a tool that needs CRLF.
+* text=auto eol=lf
