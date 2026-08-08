@@ -53,7 +53,7 @@ By design. Prompting happens only when stdin is a terminal, so the command can n
 
 ### "app already has pending submission … resolve it or pass `--replace-pending`"
 
-The Store allows **exactly one** pending submission per app. Something is already in flight. Look at it first:
+The Store allows **exactly one** pending submission per app. Something is already in flight. (`listing push --dry-run` is exempt — it creates nothing, so it previews the diff and reports the draft as a warning instead.) Look at it first:
 
 ```bash
 pcenter submission status

@@ -72,6 +72,8 @@ With JSON output, a failure writes **one JSON object to stderr** and nothing to 
 
 Typed, never stringly: booleans stay booleans (`draft`, `accepted`, `hasChanges`, `isPackageRollout`), numbers stay numbers (`packageRolloutPercentage`). `submission get` and `reviews list` pass the API's own JSON through untouched.
 
+**A list field is always a list.** An empty `listingChanges`, `imageChanges` or `warnings` is `[]`, never `null`, so `len()` on it is always safe without a nil check.
+
 | Command | Shape |
 | --- | --- |
 | `version` | `{version, commit, buildDate}` |

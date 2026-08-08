@@ -55,7 +55,15 @@ func DiffImages(metadataDir string, manifest ImageManifest, server map[string][]
 	if err != nil {
 		return ImageDiff{}, err
 	}
-	result := ImageDiff{Images: make(map[string][]json.RawMessage)}
+	// Changes and Uploads are only ever appended to, and appending nothing to a
+	// nil slice leaves it nil — which serializes as JSON null while the sibling
+	// listingChanges renders as []. A caller taking the length of one field and
+	// not the other is a bug we would be handing out, so both start empty.
+	result := ImageDiff{
+		Images:  make(map[string][]json.RawMessage),
+		Uploads: make([]ImageUpload, 0),
+		Changes: make([]ImageChange, 0),
+	}
 	localeSet := make(map[string]struct{}, len(serverByLocale)+len(manifestByLocale))
 	for locale := range serverByLocale {
 		localeSet[locale] = struct{}{}

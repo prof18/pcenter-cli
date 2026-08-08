@@ -4,6 +4,19 @@ What changed, for the people using it. Each release's section is what the releas
 publishes as its notes — `release.yml` reads it from here and refuses to publish a tag
 that has no section, so this file cannot fall behind.
 
+## 0.0.2
+
+Two things the first real use of `0.0.1` turned up.
+
+`listing push --dry-run` no longer refuses to run when a pending submission exists. A dry
+run creates nothing, so a draft cannot get in its way — being unable to preview a change
+until you had resolved a draft was exactly the wrong way round. The draft would still block
+a real push, so it is reported as a warning instead of a failure.
+
+Empty change lists in JSON output are `[]` rather than `null`. `imageChanges` could come
+back `null` while its sibling `listingChanges` was `[]`, so a caller taking the length of
+one and not the other broke on a listing with nothing to change.
+
 ## 0.0.1
 
 First release, deliberately numbered as a preview: everything below is implemented and

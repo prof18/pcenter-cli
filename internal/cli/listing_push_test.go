@@ -106,15 +106,110 @@ func TestListingPushSkipCommitCreatesDraft(t *testing.T) {
 	}
 }
 
+// A dry run creates nothing, so a pending submission is not an obstacle to it —
+// only to the real push. Failing here would leave you unable to preview a change
+// until you had resolved a draft, which is the wrong way round.
+func TestListingPushDryRunPreviewsThroughAPendingSubmission(t *testing.T) {
+	t.Parallel()
+	submission := listingPushSubmission()
+	server := fakestore.New(t, fakestore.Options{
+		AppID: "APP",
+		App: fakestore.App{ID: "APP",
+			LastPublishedApplicationSubmission: &fakestore.SubmissionRef{ID: "published"},
+			PendingApplicationSubmission:       &fakestore.SubmissionRef{ID: "draft"},
+		},
+		Submissions: map[string]json.RawMessage{
+			"published": submission,
+			"draft":     json.RawMessage(`{"id":"draft","status":"PendingCommit"}`),
+		},
+		CreateSubmissionID: "created", CreateSubmission: submission,
+		Rollouts: map[string]fakestore.Rollout{"published": {PackageRolloutStatus: "PackageRolloutCompleted"}},
+	})
+
+	dir := t.TempDir()
+	snapshot, _, err := metadata.SnapshotFromSubmission(dir, "APP", "test", time.Now(), submission)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listing := snapshot.Listings["en-us"]
+	listing.Title = "Changed"
+	snapshot.Listings["en-us"] = listing
+	if err := metadata.WriteSnapshot(dir, snapshot); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, _, exitCode := execute(t, fakeEnvironment(server), []string{
+		"--output", "json", "listing", "push", "--dir", dir, "--dry-run",
+	}, cli.BuildInfo{})
+	if exitCode != 0 {
+		t.Fatalf("dry run should succeed despite a pending draft: exit = %d stdout = %q", exitCode, stdout)
+	}
+
+	var result struct {
+		DryRun       bool     `json:"dryRun"`
+		HasChanges   bool     `json:"hasChanges"`
+		Warnings     []string `json:"warnings"`
+		ImageChanges []struct {
+			Locale string `json:"locale"`
+		} `json:"imageChanges"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("output is not parseable: %s", stdout)
+	}
+	if !result.DryRun || !result.HasChanges {
+		t.Fatalf("expected a diff to be reported: %s", stdout)
+	}
+	// The draft still blocks a real push, so saying so is the point of not failing.
+	if len(result.Warnings) != 1 || !strings.Contains(result.Warnings[0], "draft") {
+		t.Fatalf("expected one warning naming the pending draft, got %v", result.Warnings)
+	}
+	for _, request := range server.Journal() {
+		isStoreMutation := strings.HasPrefix(request.Path, "/v1.0/my/") &&
+			(request.Method == http.MethodPost || request.Method == http.MethodPut || request.Method == http.MethodDelete)
+		if isStoreMutation {
+			t.Fatalf("dry-run mutated Store: %+v", request)
+		}
+	}
+}
+
+// listingChanges renders as [] when empty; imageChanges must too. A caller doing
+// len() on one and not the other is a bug we would be handing out.
+func TestListingPushDryRunRendersEmptyChangeListsAsArrays(t *testing.T) {
+	t.Parallel()
+	server, submission := listingPushServer(t)
+	dir := t.TempDir()
+	snapshot, _, err := metadata.SnapshotFromSubmission(dir, "APP", "test", time.Now(), submission)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := metadata.WriteSnapshot(dir, snapshot); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, _, exitCode := execute(t, fakeEnvironment(server), []string{
+		"--output", "json", "listing", "push", "--dir", dir, "--dry-run",
+	}, cli.BuildInfo{})
+	if exitCode != 0 {
+		t.Fatalf("exit = %d stdout = %q", exitCode, stdout)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(stdout), &raw); err != nil {
+		t.Fatalf("output is not parseable: %s", stdout)
+	}
+	for _, field := range []string{"listingChanges", "imageChanges"} {
+		value, present := raw[field]
+		if !present {
+			t.Fatalf("%s is absent from %s", field, stdout)
+		}
+		if string(value) != "[]" {
+			t.Fatalf("%s = %s, want [] so that len() is always safe", field, value)
+		}
+	}
+}
+
 func listingPushServer(t *testing.T) (*fakestore.Server, json.RawMessage) {
 	t.Helper()
-	submission := json.RawMessage(`{
-		"id":"published","status":"Published","targetPublishMode":"Immediate",
-		"applicationPackages":[{"fileName":"app.msix","fileStatus":"Uploaded","version":"1.0.0.0"}],
-		"packageDeliveryOptions":{"isMandatoryUpdate":false,"packageRollout":{"isPackageRollout":false}},
-		"listings":{"en-us":{"baseListing":{"title":"Title","description":"Description","features":[],"keywords":[],
-		"recommendedHardware":[],"minimumHardware":[],"images":[{"fileName":"legacy.png","fileStatus":"Uploaded","id":"image","imageType":"Screenshot"}]}}}
-	}`)
+	submission := listingPushSubmission()
 	server := fakestore.New(t, fakestore.Options{
 		AppID: "APP",
 		App: fakestore.App{ID: "APP", LastPublishedApplicationSubmission: &fakestore.SubmissionRef{
@@ -127,4 +222,14 @@ func listingPushServer(t *testing.T) (*fakestore.Server, json.RawMessage) {
 		}},
 	})
 	return server, submission
+}
+
+func listingPushSubmission() json.RawMessage {
+	return json.RawMessage(`{
+		"id":"published","status":"Published","targetPublishMode":"Immediate",
+		"applicationPackages":[{"fileName":"app.msix","fileStatus":"Uploaded","version":"1.0.0.0"}],
+		"packageDeliveryOptions":{"isMandatoryUpdate":false,"packageRollout":{"isPackageRollout":false}},
+		"listings":{"en-us":{"baseListing":{"title":"Title","description":"Description","features":[],"keywords":[],
+		"recommendedHardware":[],"minimumHardware":[],"images":[{"fileName":"legacy.png","fileStatus":"Uploaded","id":"image","imageType":"Screenshot"}]}}}
+	}`)
 }

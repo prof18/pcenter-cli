@@ -160,7 +160,7 @@ Applies the directory to a new submission cloned from the last published one. Pa
 
 | Mode | What happens |
 | --- | --- |
-| `--dry-run` | Prints the per-locale diff and the would-be PUT body. Creates **nothing**. |
+| `--dry-run` | Prints the per-locale diff and the would-be PUT body. Creates **nothing**, and works even when a pending submission exists — it reports that as a warning, since it would block a real push. |
 | `--skip-commit` | Creates the draft submission with all changes and leaves it uncommitted for inspection in Partner Center. Commit it later with `pcenter submission commit`. |
 | `--yes` | Creates **and commits**. Goes live after certification. |
 
@@ -169,7 +169,7 @@ Safety rails:
 - **Identity marker.** A push into a directory whose `store.json` names a different app fails before any request is sent. This is what stops one app's metadata reaching another — or an empty directory being read as "delete everything".
 - **Locale removal.** A locale on the server with no local file is an error unless `--allow-locale-removal` is passed, so an accidentally deleted file cannot drop a Store language.
 - **Image deletion is explicit.** A server image absent from the manifest is *retained*; removing one takes a `"delete": true` entry. A missing or damaged manifest cannot mass-delete screenshots.
-- **One pending submission.** The Store allows only one. An existing draft fails the push unless `--replace-pending` is given *and* that draft is in `PendingCommit`.
+- **One pending submission.** The Store allows only one. An existing draft fails `--skip-commit` and `--yes` unless `--replace-pending` is given *and* that draft is in `PendingCommit`. `--dry-run` is unaffected — it creates nothing, so it previews and warns instead.
 - **Previous rollout.** A rollout still in progress is finalized first — no new submission can be created while one is running.
 - **Cleanup.** Any failure after the draft was created but before commit deletes the draft (best-effort; a failure to clean up is reported as a warning, never swallowed).
 

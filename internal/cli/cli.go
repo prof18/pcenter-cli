@@ -339,16 +339,21 @@ func (s *commandState) listingPushCommand() *cobra.Command {
 			if app.LastPublishedApplicationSubmission == nil {
 				return failureError{errors.New("application has no published submission")}
 			}
+			// A dry run creates nothing, so a pending submission cannot get in
+			// its way — refusing to render a diff because of one leaves you
+			// unable to preview a change until you have resolved a draft, which
+			// is exactly backwards. It would block the real push, so it is
+			// reported as a warning here instead of a failure.
 			if pending := app.PendingApplicationSubmission; pending != nil {
 				pendingSubmission, pendingErr := s.client.Submission(cmd.Context(), s.config.AppID, pending.ID)
 				if pendingErr != nil {
 					return failureError{pendingErr}
 				}
-				if !replacePending {
-					return failureError{fmt.Errorf("app already has pending submission %s with status %s; resolve it or pass --replace-pending", pending.ID, pendingSubmission.Status)}
-				}
-				if pendingSubmission.Status != "PendingCommit" {
-					return failureError{fmt.Errorf("pending submission %s has status %s; only PendingCommit can be replaced automatically", pending.ID, pendingSubmission.Status)}
+				switch {
+				case !replacePending:
+					s.warn(fmt.Sprintf("app already has pending submission %s with status %s; a real push needs the draft resolved or --replace-pending", pending.ID, pendingSubmission.Status))
+				case pendingSubmission.Status != "PendingCommit":
+					s.warn(fmt.Sprintf("pending submission %s has status %s; only PendingCommit can be replaced automatically, so a real push would fail", pending.ID, pendingSubmission.Status))
 				}
 			}
 			source, err := s.client.Submission(cmd.Context(), s.config.AppID, app.LastPublishedApplicationSubmission.ID)
@@ -359,18 +364,27 @@ func (s *commandState) listingPushCommand() *cobra.Command {
 			if err != nil {
 				return failureError{err}
 			}
-			warnings := []string{}
 			hasChanges := plan.HasChanges()
 			if releaseNotesPath != "" {
 				notesData, readErr := os.ReadFile(releaseNotesPath)
 				if readErr != nil {
 					return failureError{fmt.Errorf("read release notes: %w", readErr)}
 				}
-				plan.Body, warnings, err = submissionflow.ApplyReleaseNotes(plan.Body, notesData, releaseNotesPath)
+				var notesWarnings []string
+				plan.Body, notesWarnings, err = submissionflow.ApplyReleaseNotes(plan.Body, notesData, releaseNotesPath)
 				if err != nil {
 					return failureError{err}
 				}
+				// Routed through warn so every warning this command produces
+				// ends up in one list, whichever stage raised it.
+				for _, warning := range notesWarnings {
+					s.warn(warning)
+				}
 				hasChanges = true
+			}
+			warnings := s.warnings
+			if warnings == nil {
+				warnings = []string{}
 			}
 			result := struct {
 				DryRun         bool                         `json:"dryRun"`
