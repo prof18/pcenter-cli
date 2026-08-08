@@ -29,6 +29,7 @@ type StoreMarker struct {
 type Listing struct {
 	Title                     string          `json:"title"`
 	Description               string          `json:"description"`
+	ShortDescription          string          `json:"shortDescription"`
 	Features                  []string        `json:"features"`
 	Keywords                  []string        `json:"keywords"`
 	CopyrightAndTrademarkInfo string          `json:"copyrightAndTrademarkInfo"`

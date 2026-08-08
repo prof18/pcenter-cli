@@ -67,6 +67,7 @@ Editable base-listing text fields only:
 {
   "title": "FeedFlow",
   "description": "…",
+  "shortDescription": "…",
   "features": ["…", "…"],
   "keywords": ["…"],
   "copyrightAndTrademarkInfo": "",
@@ -78,7 +79,9 @@ Editable base-listing text fields only:
 
 | Field | Notes |
 | --- | --- |
-| `title`, `description` | Plain strings. |
+| `title` | The reserved product name for this locale. In practice only the primary locale carries one; the rest are empty and inherit it. |
+| `description` | Up to 10,000 characters. |
+| `shortDescription` | The catchy line at the top of the listing, up to 1,000 characters — though only the first ~270 are shown in some views. A separate field from `description`. |
 | `features` | At most **20** items — validated locally before any submission is created. |
 | `keywords` | Search keywords. |
 | `copyrightAndTrademarkInfo`, `licenseTerms` | Plain strings, usually empty. |

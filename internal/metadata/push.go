@@ -183,6 +183,7 @@ func diffListing(locale string, local, server Listing) []ListingChange {
 	}{
 		{"title", local.Title == server.Title},
 		{"description", local.Description == server.Description},
+		{"shortDescription", local.ShortDescription == server.ShortDescription},
 		{"features", reflect.DeepEqual(local.Features, server.Features)},
 		{"keywords", reflect.DeepEqual(local.Keywords, server.Keywords)},
 		{"copyrightAndTrademarkInfo", local.CopyrightAndTrademarkInfo == server.CopyrightAndTrademarkInfo},
@@ -228,6 +229,7 @@ func applyListing(rawListing json.RawMessage, local Listing, images []json.RawMe
 	}
 	setJSONField(base, "title", local.Title)
 	setJSONField(base, "description", local.Description)
+	setJSONField(base, "shortDescription", local.ShortDescription)
 	setJSONField(base, "features", local.Features)
 	setJSONField(base, "keywords", local.Keywords)
 	setJSONField(base, "copyrightAndTrademarkInfo", local.CopyrightAndTrademarkInfo)

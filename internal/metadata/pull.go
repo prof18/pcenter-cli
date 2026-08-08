@@ -77,6 +77,9 @@ func extractListing(metadataDir, locale string, rawListing json.RawMessage) (Lis
 	if err := decodeStringField(base, "description", &listing.Description); err != nil {
 		return Listing{}, nil, nil, fieldError(locale, err)
 	}
+	if err := decodeStringField(base, "shortDescription", &listing.ShortDescription); err != nil {
+		return Listing{}, nil, nil, fieldError(locale, err)
+	}
 	if err := decodeStringsField(base, "features", &listing.Features); err != nil {
 		return Listing{}, nil, nil, fieldError(locale, err)
 	}

@@ -19,7 +19,7 @@ func TestSnapshotFromSubmissionExtractsEditableFieldsAndMatchesLocalImages(t *te
       "listings":{
         "EN-US":{
           "baseListing":{
-            "title":"Title","description":"Description","features":["One"],"keywords":["rss"],
+            "title":"Title","description":"Description","shortDescription":"Short","features":["One"],"keywords":["rss"],
             "copyrightAndTrademarkInfo":"Copyright","licenseTerms":"Terms",
             "recommendedHardware":["Keyboard"],"minimumHardware":"Any PC",
             "releaseNotes":"not written","privacyPolicy":"obsolete",
@@ -43,6 +43,11 @@ func TestSnapshotFromSubmissionExtractsEditableFieldsAndMatchesLocalImages(t *te
 	listing := snapshot.Listings["en-us"]
 	if listing.Title != "Title" || listing.Description != "Description" || compactJSON(t, listing.MinimumHardware) != `"Any PC"` {
 		t.Fatalf("listing = %+v", listing)
+	}
+	// shortDescription is a separate Store field from description, and the one
+	// most listings actually differ on — it has to survive the round trip.
+	if listing.ShortDescription != "Short" {
+		t.Fatalf("shortDescription = %q, want %q", listing.ShortDescription, "Short")
 	}
 	encoded, err := json.Marshal(listing)
 	if err != nil {

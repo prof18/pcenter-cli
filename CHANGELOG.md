@@ -13,6 +13,10 @@ run creates nothing, so a draft cannot get in its way — being unable to previe
 until you had resolved a draft was exactly the wrong way round. The draft would still block
 a real push, so it is reported as a warning instead of a failure.
 
+`shortDescription` is now part of the listing model, so `listing pull` writes it and
+`listing push` can change it. It was previously carried through from the Store untouched —
+which meant a listing whose short description had drifted could not be fixed from files.
+
 Empty change lists in JSON output are `[]` rather than `null`. `imageChanges` could come
 back `null` while its sibling `listingChanges` was `[]`, so a caller taking the length of
 one and not the other broke on a listing with nothing to change.

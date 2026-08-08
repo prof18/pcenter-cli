@@ -69,6 +69,7 @@ func TestBuildPushPlanAppliesTextLocaleAndImageChanges(t *testing.T) {
 	}
 	listing := snapshot.Listings["en-us"]
 	listing.Title = "Changed"
+	listing.ShortDescription = "Changed short"
 	snapshot.Listings["en-us"] = listing
 	snapshot.Listings["it"] = metadata.Listing{Title: "Italiano", Features: []string{}, Keywords: []string{}}
 	snapshot.Images.Images["it"] = []metadata.ImageEntry{}
@@ -78,6 +79,7 @@ func TestBuildPushPlanAppliesTextLocaleAndImageChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []metadata.ListingChange{
+		{Locale: "en-us", Action: "update", Field: "shortDescription"},
 		{Locale: "en-us", Action: "update", Field: "title"},
 		{Locale: "it", Action: "add"},
 	}
