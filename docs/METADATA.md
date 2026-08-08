@@ -13,7 +13,12 @@ Two file formats matter to `pcenter`: the **metadata directory** that holds your
 
 ## Metadata directory
 
-The directory lives in **your app's repo**, committed alongside the code — `pcenter` is app-agnostic and receives it through `--dir`. Create it with `pcenter listing pull`:
+`pcenter` is app-agnostic and receives the directory through `--dir`, so where it lives and whether you commit it are your choice. Two models both work:
+
+- **Committed** — the directory lives in your repo and is the source of truth for your Store copy. Listing changes then arrive as reviewable diffs, and `listing push --dry-run` makes a good pull-request check.
+- **Scratch** — the directory is a gitignored working area (`.pcenter/`, say) that you regenerate with `listing pull` whenever you need it. Right when your Store copy is already maintained elsewhere — a translation pipeline, for instance — and committing this would create a second source of truth in a second format.
+
+Pick the scratch model if something else already owns the text; pick the committed model if nothing does. Either way, create the directory with `pcenter listing pull`:
 
 ```bash
 pcenter listing pull --dir assets/storecopy/microsoft-store --app-id 9NXXXXXXXXXX

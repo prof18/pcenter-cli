@@ -72,7 +72,9 @@ With JSON output, a failure writes **one JSON object to stderr** and nothing to 
 
 Typed, never stringly: booleans stay booleans (`draft`, `accepted`, `hasChanges`, `isPackageRollout`), numbers stay numbers (`packageRolloutPercentage`). `submission get` and `reviews list` pass the API's own JSON through untouched.
 
-**A list field is always a list.** An empty `listingChanges`, `imageChanges` or `warnings` is `[]`, never `null`, so `len()` on it is always safe without a nil check.
+**A list that is always present is always a list.** `listingChanges` and `imageChanges` are `[]` when empty, never `null`, so `len()` on them is safe without a nil check.
+
+`warnings` is different: it is **omitted entirely** when there are none, in every result type that has it. Read it with a default (`.warnings // []` in jq, `d.get("warnings", [])` in Python) rather than indexing it directly.
 
 | Command | Shape |
 | --- | --- |
