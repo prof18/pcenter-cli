@@ -6,7 +6,8 @@ that has no section, so this file cannot fall behind.
 
 ## 0.0.2
 
-Two things the first real use of `0.0.1` turned up.
+Three things the first real use of `0.0.1` turned up — driving a live Store listing from
+files, which is how each of these was found rather than reasoned about.
 
 `listing push --dry-run` no longer refuses to run when a pending submission exists. A dry
 run creates nothing, so a draft cannot get in its way — being unable to preview a change
