@@ -212,6 +212,21 @@ const (
 	maxKeywordLocales = 21
 )
 
+// ValidationError is input rejected before any request was sent. It carries the
+// documented `validation` code so automation gets exit 2 — "fix this and retry"
+// — rather than the generic failure exit, which says nothing about what to do.
+type ValidationError struct{ error }
+
+// ErrorCode implements the CLI's coded-error contract.
+func (ValidationError) ErrorCode() string { return "validation" }
+
+// Unwrap exposes the underlying error to errors.Is/As.
+func (e ValidationError) Unwrap() error { return e.error }
+
+func invalid(format string, args ...any) error {
+	return ValidationError{fmt.Errorf(format, args...)}
+}
+
 // ValidateListings enforces the client-side limits fixed by the metadata contract.
 func ValidateListings(listings map[string]Listing) error {
 	// Sorted so the same directory always reports the same field first; map
@@ -226,13 +241,13 @@ func ValidateListings(listings map[string]Listing) error {
 	for _, locale := range locales {
 		listing := listings[locale]
 		if count := utf8.RuneCountInString(listing.Description); count > maxDescriptionChars {
-			return fmt.Errorf("listing %q description is %d characters; maximum is %d", locale, count, maxDescriptionChars)
+			return invalid("listing %q description is %d characters; maximum is %d", locale, count, maxDescriptionChars)
 		}
 		if count := utf8.RuneCountInString(listing.ShortDescription); count > maxShortDescriptionChars {
-			return fmt.Errorf("listing %q shortDescription is %d characters; maximum is %d", locale, count, maxShortDescriptionChars)
+			return invalid("listing %q shortDescription is %d characters; maximum is %d", locale, count, maxShortDescriptionChars)
 		}
 		if len(listing.Features) > maxFeatures {
-			return fmt.Errorf("listing %q features has %d items; maximum is %d", locale, len(listing.Features), maxFeatures)
+			return invalid("listing %q features has %d items; maximum is %d", locale, len(listing.Features), maxFeatures)
 		}
 		if len(listing.Keywords) > 0 {
 			keywordLocales = append(keywordLocales, locale)
@@ -247,7 +262,7 @@ func ValidateListings(listings map[string]Listing) error {
 	// Cross-locale, so it cannot be checked inside the loop above: each locale
 	// is individually fine and only the total is rejected.
 	if len(keywordLocales) > maxKeywordLocales {
-		return fmt.Errorf(
+		return invalid(
 			"%d locales carry keywords; the Store allows %d. Clear keywords on a locale to make room: %s",
 			len(keywordLocales), maxKeywordLocales, strings.Join(keywordLocales, ", "))
 	}

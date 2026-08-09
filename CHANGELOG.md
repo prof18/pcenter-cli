@@ -18,6 +18,10 @@ many locales have keywords at all. A 22nd fails with `The size of KeywordsTotalC
 21 or less` while every locale is individually valid. The error names the locales so you can
 see which to clear.
 
+Those checks, and the existing ones on features, hardware and images, now report the
+documented `validation` code and exit 2 — "fix this and retry" — instead of the generic
+failure exit, which told automation nothing about what to do.
+
 ## 0.0.2
 
 Three things the first real use of `0.0.1` turned up — driving a live Store listing from
