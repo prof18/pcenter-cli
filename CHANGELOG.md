@@ -4,6 +4,20 @@ What changed, for the people using it. Each release's section is what the releas
 publishes as its notes — `release.yml` reads it from here and refuses to publish a tag
 that has no section, so this file cannot fall behind.
 
+## 0.0.3
+
+Two Store limits are now checked before a submission is created, rather than arriving as an
+opaque 400 from the Ingestion API after a draft exists — which then has to be cleaned up.
+
+`shortDescription` is capped at **500** characters. Microsoft's published listing docs say
+1,000; the API rejects anything longer than 500.
+
+Keywords are capped at **21 locales carrying them** across the whole submission. This is the
+surprising one: the cap is not per locale and not on the total number of keywords, but on how
+many locales have keywords at all. A 22nd fails with `The size of KeywordsTotalCount must be
+21 or less` while every locale is individually valid. The error names the locales so you can
+see which to clear.
+
 ## 0.0.2
 
 Three things the first real use of `0.0.1` turned up — driving a live Store listing from

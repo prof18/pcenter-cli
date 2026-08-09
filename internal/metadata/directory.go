@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -195,11 +196,46 @@ func LoadDirectory(dir, expectedAppID string) (Directory, error) {
 	return result, nil
 }
 
+// Store text limits, enforced here so an over-long field fails before a
+// submission is created rather than as an opaque 400 from the Ingestion API
+// after one exists.
+const (
+	maxDescriptionChars = 10000
+	// 500, not the 1000 the published "Add and edit Store listing info" page
+	// states: the API rejects 501+ with "The length of ShortDescription must be
+	// 500 or less". Confirmed against the live Store 2026-08-09.
+	maxShortDescriptionChars = 500
+	maxFeatures              = 20
+	// The API caps the number of *locales carrying keywords* — not keywords per
+	// locale, and not keywords in total — with "The size of KeywordsTotalCount
+	// must be 21 or less". Undocumented; found by adding a 22nd.
+	maxKeywordLocales = 21
+)
+
 // ValidateListings enforces the client-side limits fixed by the metadata contract.
 func ValidateListings(listings map[string]Listing) error {
-	for locale, listing := range listings {
-		if len(listing.Features) > 20 {
-			return fmt.Errorf("listing %q features has %d items; maximum is 20", locale, len(listing.Features))
+	// Sorted so the same directory always reports the same field first; map
+	// order would otherwise make the error a coin toss between two bad locales.
+	locales := make([]string, 0, len(listings))
+	for locale := range listings {
+		locales = append(locales, locale)
+	}
+	sort.Strings(locales)
+
+	keywordLocales := make([]string, 0, len(locales))
+	for _, locale := range locales {
+		listing := listings[locale]
+		if count := utf8.RuneCountInString(listing.Description); count > maxDescriptionChars {
+			return fmt.Errorf("listing %q description is %d characters; maximum is %d", locale, count, maxDescriptionChars)
+		}
+		if count := utf8.RuneCountInString(listing.ShortDescription); count > maxShortDescriptionChars {
+			return fmt.Errorf("listing %q shortDescription is %d characters; maximum is %d", locale, count, maxShortDescriptionChars)
+		}
+		if len(listing.Features) > maxFeatures {
+			return fmt.Errorf("listing %q features has %d items; maximum is %d", locale, len(listing.Features), maxFeatures)
+		}
+		if len(listing.Keywords) > 0 {
+			keywordLocales = append(keywordLocales, locale)
 		}
 		if err := validateHardware(locale, "recommendedHardware", listing.RecommendedHardware); err != nil {
 			return err
@@ -207,6 +243,13 @@ func ValidateListings(listings map[string]Listing) error {
 		if err := validateHardware(locale, "minimumHardware", listing.MinimumHardware); err != nil {
 			return err
 		}
+	}
+	// Cross-locale, so it cannot be checked inside the loop above: each locale
+	// is individually fine and only the total is rejected.
+	if len(keywordLocales) > maxKeywordLocales {
+		return fmt.Errorf(
+			"%d locales carry keywords; the Store allows %d. Clear keywords on a locale to make room: %s",
+			len(keywordLocales), maxKeywordLocales, strings.Join(keywordLocales, ", "))
 	}
 	return nil
 }

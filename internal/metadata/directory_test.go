@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -181,4 +182,42 @@ func compactJSON(t *testing.T, raw json.RawMessage) string {
 		t.Fatal(err)
 	}
 	return compact.String()
+}
+
+// Both limits below are enforced here rather than left to the API: a 400 from
+// Ingestion arrives only after a submission has been created, which then has to
+// be cleaned up.
+func TestValidateListingsRejectsOverLongShortDescription(t *testing.T) {
+	t.Parallel()
+	err := metadata.ValidateListings(map[string]metadata.Listing{
+		"en-us": {ShortDescription: strings.Repeat("a", 501)},
+	})
+	if err == nil || !strings.Contains(err.Error(), "shortDescription is 501 characters") {
+		t.Fatalf("err = %v, want the 500-character limit reported", err)
+	}
+	// 500 exactly is fine, and the limit counts runes rather than bytes.
+	if err := metadata.ValidateListings(map[string]metadata.Listing{
+		"en-us": {ShortDescription: strings.Repeat("ä", 500)},
+	}); err != nil {
+		t.Fatalf("500 runes should be accepted: %v", err)
+	}
+}
+
+func TestValidateListingsRejectsTooManyKeywordCarryingLocales(t *testing.T) {
+	t.Parallel()
+	// Each locale is individually fine; only the number of locales carrying
+	// keywords at all is capped, so this cannot be caught per locale.
+	listings := make(map[string]metadata.Listing, 22)
+	for index := range 22 {
+		listings[fmt.Sprintf("l%02d", index)] = metadata.Listing{Keywords: []string{"rss"}}
+	}
+	err := metadata.ValidateListings(listings)
+	if err == nil || !strings.Contains(err.Error(), "22 locales carry keywords") {
+		t.Fatalf("err = %v, want the keyword-locale cap reported", err)
+	}
+
+	delete(listings, "l21")
+	if err := metadata.ValidateListings(listings); err != nil {
+		t.Fatalf("21 keyword locales should be accepted: %v", err)
+	}
 }

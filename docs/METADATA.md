@@ -81,7 +81,8 @@ Editable base-listing text fields only:
 | --- | --- |
 | `title` | The reserved product name for this locale. In practice only the primary locale carries one; the rest are empty and inherit it. |
 | `description` | Up to 10,000 characters. |
-| `shortDescription` | The catchy line at the top of the listing, up to 1,000 characters — though only the first ~270 are shown in some views. A separate field from `description`. |
+| `shortDescription` | The catchy line at the top of the listing. **Up to 500 characters** — not the 1,000 Microsoft's docs state; the API rejects 501+. Only the first ~270 are shown in some views. A separate field from `description`. |
+| `keywords` | Search terms, not shown to customers. See the cross-locale cap below. |
 | `features` | At most **20** items — validated locally before any submission is created. |
 | `keywords` | Search keywords. |
 | `copyrightAndTrademarkInfo`, `licenseTerms` | Plain strings, usually empty. |
@@ -92,6 +93,25 @@ Deliberately **not** in these files:
 - `privacyPolicy`, `supportContact`, `websiteUrl` — the API ignores them; they live on Partner Center's Properties page.
 - `releaseNotes` — owned by the [release-notes file](#release-notes-file).
 - `platformOverrides` — not modeled locally; `push` carries whatever the server has through unchanged.
+
+### Validated locally, before anything is created
+
+| Rule | Limit |
+| --- | --- |
+| `description` | ≤ 10,000 characters |
+| `shortDescription` | ≤ **500** characters (the docs say 1,000; the API says 500) |
+| `features` | ≤ 20 items |
+| `recommendedHardware` / `minimumHardware` | ≤ 11 items |
+| Locales carrying keywords | ≤ **21** across the whole submission |
+
+That last one is the surprising one, and it is undocumented. The cap is not on keywords per
+locale, nor on keywords in total — it is on **how many locales have keywords at all**. Adding
+keywords to a 22nd locale fails with `The size of KeywordsTotalCount must be 21 or less`,
+even though every locale is individually valid. To add a new one, clear the keywords on
+another locale first.
+
+pcenter checks all of these before creating a submission, because the alternative is a 400
+from the Ingestion API *after* a draft exists — which then has to be cleaned up.
 
 **Adding a locale** is adding a `listings/<locale>.json` file. **Removing a locale** — deleting the file — is an error unless `listing push --allow-locale-removal` is passed, so an accidental deletion cannot drop a Store language.
 
