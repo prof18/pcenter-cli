@@ -110,6 +110,10 @@ func BuildPushPlan(metadataDir string, directory Directory, submissionJSON json.
 		return leftKey < rightKey
 	})
 
+	if err := validateListingTitles(source, localListings); err != nil {
+		return PushPlan{}, err
+	}
+
 	body := make(map[string]json.RawMessage, len(listingPushAllowlist)+3)
 	for _, property := range listingPushAllowlist {
 		if value, exists := source[property]; exists {
@@ -263,4 +267,61 @@ func rawOrNull(raw json.RawMessage) json.RawMessage {
 		return json.RawMessage(`null`)
 	}
 	return cloneRaw(raw)
+}
+
+// validateListingTitles enforces the Store's rule that a listing language with
+// no package behind it must carry a title.
+//
+// Partner Center draws a listing's product name from the package for that
+// language. A language the packages do not include has no package to draw from,
+// so its title must be set explicitly — Microsoft's own listing documentation
+// says as much. Omit it and the *whole submission* is rejected at commit with
+// `Validation error: MissingTitle`, landing in CommitFailed after the upload has
+// already happened.
+//
+// The packages advertise their languages, so this is exact rather than a guess.
+// When they advertise none, the check is skipped rather than failing everything:
+// an unknown package language set is not evidence that a title is missing.
+func validateListingTitles(source map[string]json.RawMessage, listings map[string]Listing) error {
+	covered, err := packageLanguages(source["applicationPackages"])
+	if err != nil || len(covered) == 0 {
+		return err
+	}
+	missing := make([]string, 0)
+	for locale, listing := range listings {
+		if strings.TrimSpace(listing.Title) != "" {
+			continue
+		}
+		// Exact match only: the Store treats de-de as a separate listing
+		// language from de, and covers neither with the other.
+		if _, ok := covered[strings.ToLower(locale)]; !ok {
+			missing = append(missing, locale)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	sort.Strings(missing)
+	return invalid(
+		"listing locale(s) %s have no title and are not among the languages the packages support, so the Store would reject the submission with MissingTitle; set a reserved product name as the title for each",
+		strings.Join(missing, ", "))
+}
+
+func packageLanguages(raw json.RawMessage) (map[string]struct{}, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, nil
+	}
+	var packages []struct {
+		Languages []string `json:"languages"`
+	}
+	if err := json.Unmarshal(raw, &packages); err != nil {
+		return nil, fmt.Errorf("decode application packages: %w", err)
+	}
+	covered := make(map[string]struct{})
+	for _, pkg := range packages {
+		for _, language := range pkg.Languages {
+			covered[strings.ToLower(language)] = struct{}{}
+		}
+	}
+	return covered, nil
 }

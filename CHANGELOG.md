@@ -18,6 +18,14 @@ many locales have keywords at all. A 22nd fails with `The size of KeywordsTotalC
 21 or less` while every locale is individually valid. The error names the locales so you can
 see which to clear.
 
+A listing language the packages do not include must carry a title, and that is now checked
+before the submission is created. Partner Center draws a listing's product name from the
+package for that language; a language with no package behind it has nothing to draw from, so
+omitting the title fails the **whole submission** at commit with `Validation error:
+MissingTitle` — after the upload has already happened. The packages advertise their
+languages, so the check is exact rather than a guess, and it is skipped when they advertise
+none.
+
 A failed submission can now be deleted. `submission delete-draft` and `--replace-pending`
 previously accepted only `PendingCommit`, so a submission whose commit or certification
 failed left the app wedged: it could not be deleted, it could not be replaced, and it still

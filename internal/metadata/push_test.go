@@ -165,3 +165,44 @@ func assertJSONEqual(t *testing.T, actual, expected json.RawMessage) {
 func testTime() time.Time {
 	return time.Date(2026, time.July, 14, 12, 0, 0, 0, time.UTC)
 }
+
+// A listing language the packages do not include has no package to draw its
+// product name from, so the Store rejects the whole submission at commit with
+// MissingTitle — after the upload has already happened. Catching it locally is
+// the difference between a validation error and a CommitFailed to clean up.
+func TestBuildPushPlanRequiresATitleForLocalesThePackagesDoNotCover(t *testing.T) {
+	t.Parallel()
+	submission := json.RawMessage(`{
+		"id":"published","status":"Published",
+		"applicationPackages":[{"fileName":"app.msix","fileStatus":"Uploaded","languages":["en-US","de"]}],
+		"listings":{"en-us":{"baseListing":{"title":"App","description":"d","features":[],"keywords":[],
+			"images":[{"fileName":"legacy.png","fileStatus":"Uploaded","id":"image","imageType":"Screenshot"}]}}}
+	}`)
+	dir := t.TempDir()
+	snapshot, _, err := metadata.SnapshotFromSubmission(dir, "APP", "test", testTime(), submission)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// de is covered by the package, so an empty title is fine there.
+	snapshot.Listings["de"] = metadata.Listing{Description: "d", Features: []string{}, Keywords: []string{}}
+	// el is not, so it must carry one.
+	snapshot.Listings["el"] = metadata.Listing{Description: "d", Features: []string{}, Keywords: []string{}}
+	snapshot.Images.Images["de"] = []metadata.ImageEntry{}
+	snapshot.Images.Images["el"] = []metadata.ImageEntry{}
+
+	_, err = metadata.BuildPushPlan(dir, snapshot, submission, false)
+	if err == nil || !strings.Contains(err.Error(), "el") {
+		t.Fatalf("err = %v, want el reported as needing a title", err)
+	}
+	if strings.Contains(err.Error(), "de") {
+		t.Fatalf("de is covered by the package and must not be reported: %v", err)
+	}
+
+	// Giving it a title clears the check.
+	listing := snapshot.Listings["el"]
+	listing.Title = "App"
+	snapshot.Listings["el"] = listing
+	if _, err := metadata.BuildPushPlan(dir, snapshot, submission, false); err != nil {
+		t.Fatalf("a titled locale should be accepted: %v", err)
+	}
+}
