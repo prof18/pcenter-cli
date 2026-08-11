@@ -317,6 +317,22 @@ func ClassifyStatus(status string) StatusClass {
 	}
 }
 
+// IsRemovableDraftStatus reports whether a pending submission can be deleted to
+// unblock the app.
+//
+// PendingCommit is the never-committed draft. The failed statuses matter just as
+// much: a submission that failed commit, pre-processing, certification, publish
+// or release is finished, not in flight — but it is still the app's one pending
+// submission, so until it is removed nothing else can be created. Refusing to
+// delete it leaves the app wedged with no way out of the CLI, which is exactly
+// the situation this tool exists to get you out of.
+//
+// Anything else is genuinely in progress and must not be deleted from under the
+// Store.
+func IsRemovableDraftStatus(status string) bool {
+	return status == "PendingCommit" || ClassifyStatus(status) == StatusFailed
+}
+
 func statusFailure(status storetypes.SubmissionStatus) error {
 	details := strings.TrimSpace(string(status.StatusDetails))
 	if details == "" {

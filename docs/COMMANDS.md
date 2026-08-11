@@ -253,7 +253,7 @@ Commits a prepared draft — the second half of `publish msix --skip-commit` or 
 pcenter submission delete-draft --yes
 ```
 
-Deletes the pending draft. Refuses unless its status is `PendingCommit` — a submission already in certification is not yours to delete. The deletion is verified, not assumed.
+Deletes the pending draft. Accepts an uncommitted `PendingCommit` draft, or one in any failed state (`CommitFailed`, `CertificationFailed`, …) — a failed submission is finished but still counts as the app's one pending submission, so it blocks everything until removed. Refuses anything genuinely in flight, such as a submission in certification. The deletion is verified, not assumed.
 
 ---
 

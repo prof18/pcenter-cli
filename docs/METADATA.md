@@ -79,7 +79,7 @@ Editable base-listing text fields only:
 
 | Field | Notes |
 | --- | --- |
-| `title` | The reserved product name for this locale. In practice only the primary locale carries one; the rest are empty and inherit it. |
+| `title` | The reserved product name, chosen in Partner Center rather than written here. Some locales carry it and some are empty; leave existing ones alone. A locale you are **adding** must have one, or the Store rejects the submission with `MissingTitle`. |
 | `description` | Up to 10,000 characters. |
 | `shortDescription` | The catchy line at the top of the listing. **Up to 500 characters** — not the 1,000 Microsoft's docs state; the API rejects 501+. Only the first ~270 are shown in some views. A separate field from `description`. |
 | `keywords` | Search terms, not shown to customers. See the cross-locale cap below. |

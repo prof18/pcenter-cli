@@ -183,3 +183,44 @@ func TestSubmissionWatchStillFailsOnAFailedStatus(t *testing.T) {
 		t.Fatal("a failed submission must not exit 0")
 	}
 }
+
+// A submission whose commit failed is finished, not in flight — and it is still
+// the app's one pending submission, so refusing to delete it leaves the app
+// wedged with no way out of the CLI.
+func TestSubmissionDeleteDraftRemovesAFailedSubmission(t *testing.T) {
+	t.Parallel()
+	for _, status := range []string{"PendingCommit", "CommitFailed", "CertificationFailed"} {
+		server := fakestore.New(t, fakestore.Options{
+			AppID: "APP",
+			App: fakestore.App{ID: "APP",
+				PendingApplicationSubmission: &fakestore.SubmissionRef{ID: "pending"},
+			},
+			Submissions: map[string]json.RawMessage{
+				"pending": json.RawMessage(`{"id":"pending","status":"` + status + `"}`),
+			},
+		})
+		_, stderr, exitCode := execute(t, fakeEnvironment(server), []string{
+			"submission", "delete-draft", "--yes",
+		}, cli.BuildInfo{})
+		if exitCode != 0 {
+			t.Fatalf("status %s: exit = %d, want 0; stderr = %q", status, exitCode, stderr)
+		}
+	}
+
+	// Anything genuinely in flight must still be refused.
+	server := fakestore.New(t, fakestore.Options{
+		AppID: "APP",
+		App: fakestore.App{ID: "APP",
+			PendingApplicationSubmission: &fakestore.SubmissionRef{ID: "pending"},
+		},
+		Submissions: map[string]json.RawMessage{
+			"pending": json.RawMessage(`{"id":"pending","status":"Certification"}`),
+		},
+	})
+	_, stderr, exitCode := execute(t, fakeEnvironment(server), []string{
+		"submission", "delete-draft", "--yes",
+	}, cli.BuildInfo{})
+	if exitCode == 0 || !strings.Contains(stderr, "Certification") {
+		t.Fatalf("an in-flight submission must be refused: exit = %d stderr = %q", exitCode, stderr)
+	}
+}

@@ -130,8 +130,8 @@ func (p *ListingPublisher) Push(ctx context.Context, options ListingPushOptions)
 		if !options.ReplacePending {
 			return result, fmt.Errorf("app already has pending submission %s with status %s; resolve it or pass --replace-pending", pending.ID, pendingSubmission.Status)
 		}
-		if pendingSubmission.Status != "PendingCommit" {
-			return result, fmt.Errorf("pending submission %s has status %s; only PendingCommit can be replaced automatically", pending.ID, pendingSubmission.Status)
+		if !IsRemovableDraftStatus(pendingSubmission.Status) {
+			return result, fmt.Errorf("pending submission %s has status %s; only an uncommitted or failed submission can be replaced automatically", pending.ID, pendingSubmission.Status)
 		}
 		if err := p.manager.DeleteDraft(ctx, options.AppID, pending.ID); err != nil {
 			return result, err

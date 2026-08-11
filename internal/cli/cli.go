@@ -352,8 +352,8 @@ func (s *commandState) listingPushCommand() *cobra.Command {
 				switch {
 				case !replacePending:
 					s.warn(fmt.Sprintf("app already has pending submission %s with status %s; a real push needs the draft resolved or --replace-pending", pending.ID, pendingSubmission.Status))
-				case pendingSubmission.Status != "PendingCommit":
-					s.warn(fmt.Sprintf("pending submission %s has status %s; only PendingCommit can be replaced automatically, so a real push would fail", pending.ID, pendingSubmission.Status))
+				case !submissionflow.IsRemovableDraftStatus(pendingSubmission.Status):
+					s.warn(fmt.Sprintf("pending submission %s has status %s; only an uncommitted or failed submission can be replaced automatically, so a real push would fail", pending.ID, pendingSubmission.Status))
 				}
 			}
 			source, err := s.client.Submission(cmd.Context(), s.config.AppID, app.LastPublishedApplicationSubmission.ID)
@@ -591,8 +591,11 @@ func (s *commandState) submissionDeleteCommand() *cobra.Command {
 				return failureError{getErr}
 			}
 			status := submission.Status
-			if status != "PendingCommit" {
-				return failureError{fmt.Errorf("refusing to delete submission %s in status %s; only PendingCommit drafts can be deleted", pending.ID, status)}
+			// An uncommitted draft, or one whose commit/certification failed:
+			// both are finished and both block every new submission until
+			// removed. Anything else is genuinely in flight.
+			if !submissionflow.IsRemovableDraftStatus(status) {
+				return failureError{fmt.Errorf("refusing to delete submission %s in status %s; only an uncommitted or failed submission can be deleted", pending.ID, status)}
 			}
 			if err := s.prepareManager(); err != nil {
 				return err

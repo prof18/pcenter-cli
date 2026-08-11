@@ -18,6 +18,12 @@ many locales have keywords at all. A 22nd fails with `The size of KeywordsTotalC
 21 or less` while every locale is individually valid. The error names the locales so you can
 see which to clear.
 
+A failed submission can now be deleted. `submission delete-draft` and `--replace-pending`
+previously accepted only `PendingCommit`, so a submission whose commit or certification
+failed left the app wedged: it could not be deleted, it could not be replaced, and it still
+counted as the app's one pending submission, so nothing new could be created either. Both
+now accept any failed status as well, and still refuse anything genuinely in flight.
+
 `submission watch` no longer exits non-zero when it runs out of poll attempts. Certification
 takes hours, so reaching the attempt limit means pcenter stopped watching — not that the
 submission is in trouble — and failing there turns a healthy release into a red CI job. It
