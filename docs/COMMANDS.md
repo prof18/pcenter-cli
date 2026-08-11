@@ -237,6 +237,8 @@ pcenter submission watch [--id <id>] [--poll-seconds 30] [--poll-attempts 20]
 
 Polls until the submission reaches a terminal status. `Published` succeeds; `Canceled` is neutral; any `*Failed` status exits non-zero with `statusDetails` attached; anything else keeps polling. Defaults to the current pending submission.
 
+Running out of attempts is **not** a failure — certification legitimately takes hours, and it means pcenter stopped watching rather than the Store stopping work. You get the last observed status with `classification: "in-progress"`, a `warning`, and exit 0. Re-run to keep watching. Only a genuinely failed status exits non-zero.
+
 ### `submission commit`
 
 ```

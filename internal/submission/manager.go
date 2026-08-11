@@ -70,6 +70,11 @@ type WatchResult struct {
 	Status         string          `json:"status"`
 	StatusDetails  json.RawMessage `json:"statusDetails,omitempty"`
 	Classification StatusClass     `json:"classification"`
+	// Warning is set when the poll budget ran out with the submission still in
+	// progress. That is not a failure — it is this command giving up watching,
+	// not the Store giving up working — so it is reported the way `commit`
+	// reports the same situation rather than as an error.
+	Warning string `json:"warning,omitempty"`
 }
 
 // NewManager validates and constructs a flow manager.
@@ -223,7 +228,13 @@ func (m *Manager) Watch(ctx context.Context, appID, submissionID string, poll Po
 			}
 		}
 	}
-	return latest, fmt.Errorf("submission remained %s after %d poll attempts", latest.Status, poll.Attempts)
+	// Running out of attempts means this command stopped watching, not that the
+	// submission is in trouble: certification legitimately takes hours. Failing
+	// here turns a healthy release into a red CI job, and makes the documented
+	// in-progress classification unreachable. Report it and exit clean.
+	latest.Warning = fmt.Sprintf(
+		"submission is still %s after %d poll attempts; Partner Center continues processing", latest.Status, poll.Attempts)
+	return latest, nil
 }
 
 // SetRolloutPercentage updates the rollout percentage query parameter and confirms state.

@@ -121,3 +121,65 @@ func countRequests(journal []fakestore.Request, method, pathSuffix string) int {
 	}
 	return count
 }
+
+// Running out of poll attempts means pcenter stopped watching, not that the
+// submission failed — certification legitimately takes hours. Exiting non-zero
+// here turns a healthy release into a red CI job, and makes the documented
+// "in-progress" classification unreachable.
+func TestSubmissionWatchReportsStillInProgressWithoutFailing(t *testing.T) {
+	t.Parallel()
+	server := fakestore.New(t, fakestore.Options{
+		AppID: "APP",
+		App: fakestore.App{ID: "APP",
+			PendingApplicationSubmission: &fakestore.SubmissionRef{ID: "pending"},
+		},
+		Submissions: map[string]json.RawMessage{"pending": json.RawMessage(`{"id":"pending","status":"CommitStarted"}`)},
+		StatusQueues: map[string][]string{
+			"pending": {"CommitStarted", "CommitStarted", "CommitStarted"},
+		},
+	})
+
+	stdout, stderr, exitCode := execute(t, fakeEnvironment(server), []string{
+		"--output", "json", "submission", "watch", "--poll-seconds", "0", "--poll-attempts", "2",
+	}, cli.BuildInfo{})
+	if exitCode != 0 {
+		t.Fatalf("exit = %d, want 0; stdout = %q stderr = %q", exitCode, stdout, stderr)
+	}
+	var result struct {
+		Status         string `json:"status"`
+		Classification string `json:"classification"`
+		Warning        string `json:"warning"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("output is not parseable: %s", stdout)
+	}
+	if result.Status != "CommitStarted" || result.Classification != "in-progress" {
+		t.Fatalf("result = %+v, want the last observed status classified in-progress", result)
+	}
+	if !strings.Contains(result.Warning, "still CommitStarted") {
+		t.Fatalf("warning = %q, want it to say the submission is still processing", result.Warning)
+	}
+}
+
+// A genuinely failed submission must still exit non-zero: the fix above must not
+// swallow the case automation actually needs to catch.
+func TestSubmissionWatchStillFailsOnAFailedStatus(t *testing.T) {
+	t.Parallel()
+	server := fakestore.New(t, fakestore.Options{
+		AppID: "APP",
+		App: fakestore.App{ID: "APP",
+			PendingApplicationSubmission: &fakestore.SubmissionRef{ID: "pending"},
+		},
+		Submissions: map[string]json.RawMessage{"pending": json.RawMessage(`{"id":"pending","status":"CertificationFailed"}`)},
+		StatusQueues: map[string][]string{
+			"pending": {"CertificationFailed"},
+		},
+	})
+
+	_, _, exitCode := execute(t, fakeEnvironment(server), []string{
+		"submission", "watch", "--poll-seconds", "0", "--poll-attempts", "2",
+	}, cli.BuildInfo{})
+	if exitCode == 0 {
+		t.Fatal("a failed submission must not exit 0")
+	}
+}

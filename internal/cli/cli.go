@@ -670,7 +670,14 @@ func (s *commandState) submissionWatchCommand() *cobra.Command {
 			if s.format == output.JSON {
 				return wrapFailure(renderer.Value(result))
 			}
-			return wrapFailure(renderer.Rows([]string{"STATUS", "CLASSIFICATION", "DETAILS"}, [][]string{{result.Status, string(result.Classification), string(result.StatusDetails)}}))
+			if err := renderer.Rows([]string{"STATUS", "CLASSIFICATION", "DETAILS"}, [][]string{{result.Status, string(result.Classification), string(result.StatusDetails)}}); err != nil {
+				return failureError{err}
+			}
+			if result.Warning != "" {
+				_, err := fmt.Fprintln(s.dependencies.Stderr, "Warning:", result.Warning)
+				return wrapFailure(err)
+			}
+			return nil
 		},
 	}
 	command.Flags().StringVar(&id, "id", "", "submission id; defaults to pending")

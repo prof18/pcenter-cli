@@ -18,6 +18,14 @@ many locales have keywords at all. A 22nd fails with `The size of KeywordsTotalC
 21 or less` while every locale is individually valid. The error names the locales so you can
 see which to clear.
 
+`submission watch` no longer exits non-zero when it runs out of poll attempts. Certification
+takes hours, so reaching the attempt limit means pcenter stopped watching — not that the
+submission is in trouble — and failing there turns a healthy release into a red CI job. It
+now reports the last observed status with `classification: "in-progress"` and a warning, the
+same way `submission commit` already handled the identical situation, and exits 0. A
+genuinely failed status still exits non-zero. This also makes the documented `in-progress`
+classification reachable, which it never was before.
+
 Those checks, and the existing ones on features, hardware and images, now report the
 documented `validation` code and exit 2 — "fix this and retry" — instead of the generic
 failure exit, which told automation nothing about what to do.

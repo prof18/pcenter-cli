@@ -88,7 +88,7 @@ Typed, never stringly: booleans stay booleans (`draft`, `accepted`, `hasChanges`
 | `reviews list` | The API's review objects, unmodified |
 | `submission status` | `[{type: "published"\|"pending", id, status, statusDetails}]` |
 | `submission get` | The raw submission JSON (`fileUploadUrl` redacted unless `--include-upload-url`) |
-| `submission watch` | `{status, statusDetails, classification: "success"\|"failed"\|"neutral"\|"in-progress"}` |
+| `submission watch` | `{status, statusDetails, classification: "success"\|"failed"\|"neutral"\|"in-progress", warning?}` — `in-progress` plus a `warning` means the poll budget ran out, not that anything is wrong; exit 0 |
 | `submission commit` | `{status, statusDetails, accepted, warning?}` |
 | `submission delete-draft` | `{deletedSubmissionId}` |
 | `rollout status\|finalize\|set-percentage` | `{isPackageRollout, packageRolloutPercentage, packageRolloutStatus, fallbackSubmissionId}` |
