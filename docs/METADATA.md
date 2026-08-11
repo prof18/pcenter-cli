@@ -82,9 +82,8 @@ Editable base-listing text fields only:
 | `title` | The reserved product name, chosen in Partner Center rather than written here. Some locales carry it and some are empty; leave existing ones alone. A locale you are **adding** must have one, or the Store rejects the submission with `MissingTitle`. |
 | `description` | Up to 10,000 characters. |
 | `shortDescription` | The catchy line at the top of the listing. **Up to 500 characters** — not the 1,000 Microsoft's docs state; the API rejects 501+. Only the first ~270 are shown in some views. A separate field from `description`. |
-| `keywords` | Search terms, not shown to customers. See the cross-locale cap below. |
 | `features` | At most **20** items — validated locally before any submission is created. |
-| `keywords` | Search keywords. |
+| `keywords` | Search terms, not shown to customers. See the cross-locale cap below. |
 | `copyrightAndTrademarkInfo`, `licenseTerms` | Plain strings, usually empty. |
 | `recommendedHardware`, `minimumHardware` | Raw JSON passthrough; validated leniently. The API reference is ambiguous about the type, and live responses return arrays. |
 
