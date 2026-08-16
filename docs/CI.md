@@ -1,6 +1,6 @@
 # Using pcenter in CI
 
-`pcenter` is built to run unattended: it never prompts, it emits JSON when its output is piped, and its exit codes distinguish the failures that need different responses. This page covers getting the binary onto a runner, giving it credentials, and the two workflows worth automating.
+This page covers installing pcenter on a runner, providing credentials, and automating releases and listing updates. For output formats and exit codes, see [Automation](AUTOMATION.md).
 
 - [Credentials](#credentials)
 - [Installing on a runner](#installing-on-a-runner)
@@ -44,7 +44,7 @@ Archive names are `pcenter_<tag>_<os>_<arch>.<ext>`:
 - name: Install pcenter
   run: |
     set -euo pipefail
-    VERSION=v0.0.1
+    VERSION=v0.0.3
     curl -fsSL -O "https://github.com/prof18/pcenter-cli/releases/download/${VERSION}/pcenter_${VERSION}_linux_amd64.tar.gz"
     curl -fsSL -O "https://github.com/prof18/pcenter-cli/releases/download/${VERSION}/checksums.txt"
     grep " pcenter_${VERSION}_linux_amd64.tar.gz\$" checksums.txt | sha256sum -c -
@@ -59,7 +59,7 @@ Archive names are `pcenter_<tag>_<os>_<arch>.<ext>`:
 - name: Install pcenter
   shell: pwsh
   run: |
-    $Version = 'v0.0.1'
+    $Version = 'v0.0.3'
     $Archive = "pcenter_${Version}_windows_amd64.zip"
     $Base    = "https://github.com/prof18/pcenter-cli/releases/download/$Version"
     Invoke-WebRequest "$Base/$Archive" -OutFile $Archive
@@ -90,26 +90,23 @@ Fail early with a diagnosis instead of a 401 halfway through a release:
 
 ## Publishing a release
 
+You can publish from a Linux job after building the MSIX on Windows and passing it through as a workflow artifact. This keeps building and publishing independently retryable.
+
 ```yaml
 - name: Publish to the Microsoft Store
   run: |
     pcenter publish msix \
       --path "${{ steps.build.outputs.msix }}" \
       --rollout-percentage 90 \
-      --release-notes assets/storecopy/microsoft-store-release-notes.json \
+      --release-notes store/microsoft-release-notes.json \
       --replace-pending
 ```
 
 (On a Windows runner the same command runs under `shell: pwsh` with backtick continuations, or on one line.)
 
-What that does, and why each flag is there:
+`--release-notes` is required unless you explicitly pass `--keep-existing-release-notes`. The file must include every Store locale; see [Release notes](METADATA.md#release-notes-file) for its format.
 
-- `--release-notes` (or `--keep-existing-release-notes`) is **mandatory**. Without it a forgotten flag would silently ship the previous version's changelog. A Store locale missing from the file fails the command.
-- `--rollout-percentage 90` starts a staged rollout. Finish it later with `pcenter rollout finalize`.
-- `--replace-pending` clears an existing uncommitted draft, since the Store allows only one pending submission.
-- The command commits by default. Add `--skip-commit` to leave a draft for a human, and commit it with `pcenter submission commit`.
-
-Failures before the commit started delete the draft automatically, so a failed run does not leave the next one blocked.
+`--rollout-percentage 90` starts a staged rollout. Finish it later with `pcenter rollout finalize`. `--replace-pending` removes a disposable draft; see [Operational caveats](#operational-caveats) before using it. Add `--skip-commit` to leave a draft for review.
 
 To finish a staged rollout in a later job or a manual dispatch:
 
@@ -125,7 +122,7 @@ Listing text and screenshots live in a directory in your repo ([Metadata directo
 
 ```yaml
 - name: Show pending Store listing changes
-  run: pcenter listing push --dir assets/storecopy/microsoft-store --dry-run
+  run: pcenter listing push --dir store/microsoft --dry-run
 ```
 
 `--dry-run` creates nothing — it prints the per-locale diff and the request body that would be sent. Push for real on merge with `--yes` (creates and commits) or `--skip-commit` (creates a draft for review).
@@ -134,10 +131,8 @@ Listing text and screenshots live in a directory in your repo ([Metadata directo
 
 ## Operational caveats
 
-**`--replace-pending` deletes *any* uncommitted draft** — including one a human left in Partner Center for inspection. Only one pending submission can exist, so a CI release and an in-flight local draft are mutually exclusive: commit or delete local drafts before tagging a release.
+**`--replace-pending` deletes any disposable draft**, including one someone left in Partner Center for inspection. Check for a pending submission before using it.
 
-**Timeouts are not failures.** The Store API returns 504 for operations that in fact succeeded. Every mutation verifies the resulting state rather than trusting the response code, so a timeout mid-finalize resolves instead of leaving the job guessing.
+After a timeout, check the resulting state; pcenter verifies completed changes because the Store can return a 504 after accepting a request. If polling stops, resume with `pcenter submission watch`.
 
-**Exhausting the poll budget is not a failure either.** `--poll-attempts` bounds how long pcenter waits after a commit; reaching it means it stopped watching. Resume with `pcenter submission watch`.
-
-**Exit codes** distinguish what to do next — `3` re-authenticate, `4` never retry unchanged, `5` back off. The full table is in [the automation contract](AUTOMATION.md#exit-codes).
+For failure handling and exit codes, see [Automation](AUTOMATION.md#exit-codes).

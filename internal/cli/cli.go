@@ -415,7 +415,7 @@ func (s *commandState) listingPushCommand() *cobra.Command {
 	command.Flags().BoolVar(&skipCommit, "skip-commit", false, "create and leave an uncommitted draft")
 	command.Flags().BoolVar(&yes, "yes", false, "create and commit the submission")
 	command.Flags().StringVar(&releaseNotesPath, "release-notes", "", "release-notes JSON file")
-	command.Flags().BoolVar(&replacePending, "replace-pending", false, "delete an existing PendingCommit draft")
+	command.Flags().BoolVar(&replacePending, "replace-pending", false, "delete an existing uncommitted or failed pending submission")
 	command.Flags().BoolVar(&allowLocaleRemoval, "allow-locale-removal", false, "allow Store locales missing from the metadata directory to be removed")
 	return command
 }
@@ -497,7 +497,7 @@ func (s *commandState) localesCommand() *cobra.Command {
 }
 
 func (s *commandState) submissionCommand() *cobra.Command {
-	parent := &cobra.Command{Use: "submission", Short: "Inspect submissions"}
+	parent := &cobra.Command{Use: "submission", Short: "Inspect and drive submissions"}
 	parent.AddCommand(
 		s.submissionStatusCommand(), s.submissionGetCommand(), s.submissionDeleteCommand(),
 		s.submissionCommitCommand(), s.submissionWatchCommand(),
@@ -690,7 +690,7 @@ func (s *commandState) submissionWatchCommand() *cobra.Command {
 }
 
 func (s *commandState) rolloutCommand() *cobra.Command {
-	parent := &cobra.Command{Use: "rollout", Short: "Inspect package rollouts"}
+	parent := &cobra.Command{Use: "rollout", Short: "Inspect and drive package rollouts"}
 	parent.AddCommand(&cobra.Command{
 		Use:   "status",
 		Short: "Show the last published package rollout",
@@ -877,7 +877,7 @@ func (s *commandState) publishCommand() *cobra.Command {
 	command.Flags().BoolVar(&keepExisting, "keep-existing-release-notes", false, "explicitly retain cloned release notes")
 	command.Flags().Float64Var(&rolloutPercentage, "rollout-percentage", 90, "package rollout percentage")
 	command.Flags().BoolVar(&skipCommit, "skip-commit", false, "leave an uncommitted draft")
-	command.Flags().BoolVar(&replacePending, "replace-pending", false, "delete an existing PendingCommit draft")
+	command.Flags().BoolVar(&replacePending, "replace-pending", false, "delete an existing uncommitted or failed pending submission")
 	command.Flags().IntVar(&pollSeconds, "poll-seconds", 30, "seconds between status polls")
 	command.Flags().IntVar(&pollAttempts, "poll-attempts", 20, "maximum status polls")
 	parent.AddCommand(command)

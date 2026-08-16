@@ -1,6 +1,6 @@
 # Troubleshooting
 
-Failures you are likely to hit, what they mean, and what to do. Start with `pcenter auth doctor` for anything credential-shaped — it checks the whole setup at once and tells you which part is broken.
+Common failures, what they mean, and the next command to run. Start with `pcenter auth doctor` for credential problems.
 
 - [Credentials](#credentials)
 - [Submissions](#submissions)
@@ -25,7 +25,7 @@ or by exporting the `MS_STORE_*` variables — they take precedence over the fil
 
 ### "env file … does not exist" / exit 2
 
-You named a credentials file explicitly (`--env-file` or `PCENTER_ENV_FILE`) and it is not there. pcenter refuses to silently fall back, because failing later on a missing credential is worse than failing here. Create it with `pcenter auth login --env-file <path>`, or drop the flag to use the default.
+You named a credentials file explicitly (`--env-file` or `PCENTER_ENV_FILE`) and it is not there. Create it with `pcenter auth login --env-file <path>`, or drop the flag to use the default.
 
 A leading `~` is expanded, so `PCENTER_ENV_FILE=~/creds.env` works — but a quoted `'~/creds.env'` passed through a CI YAML value can still arrive as a literal path segment. Prefer an absolute path in CI, or just use the environment variables.
 
@@ -63,13 +63,22 @@ Then choose:
 
 - It is yours and finished → `pcenter submission commit`
 - It is an abandoned draft → `pcenter submission delete-draft --yes`
+- It is in a failed state (`CommitFailed`, `CertificationFailed`, …) → `pcenter submission delete-draft --yes`. It is finished, but it still occupies the app's one pending slot.
 - You know it is disposable and you are in CI → re-run with `--replace-pending`
 
 Be careful with `--replace-pending`: it deletes *any* uncommitted draft, including one a human left in Partner Center for inspection.
 
-### "refusing to delete submission … only PendingCommit drafts can be deleted"
+### "refusing to delete submission … only an uncommitted or failed submission can be deleted"
 
-The submission has moved past `PendingCommit` — it is in certification or already publishing. Deleting it is not yours to do from the API. Wait for it to reach a terminal status (`pcenter submission watch`), or cancel it in Partner Center.
+The submission is genuinely in flight — in certification, or already publishing. Deleting it is not yours to do from the API. Wait for it to reach a terminal status (`pcenter submission watch`), or cancel it in Partner Center.
+
+A submission in a *failed* state is a different case and **can** be deleted: `CommitFailed`, `CertificationFailed`, `PreProcessingFailed`, `PublishFailed` and `ReleaseFailed` are finished, but they still count as the app's one pending submission, so they block everything until removed.
+
+```bash
+pcenter submission delete-draft --yes
+```
+
+`--replace-pending` on `publish msix` and `listing push` accepts the same set.
 
 ### `submission watch` stops without a verdict
 
@@ -101,7 +110,7 @@ pcenter rollout status
 
 ### The rollout is stuck / the release never reached 100%
 
-This is the failure the CLI was built for:
+Check the Store state, then finalize the rollout:
 
 ```bash
 pcenter rollout status      # what does the Store actually think?
@@ -136,6 +145,18 @@ A locale exists in the Store but has no `listings/<locale>.json`. Usually that m
 
 Check the manifest. A changed `sha256` means the file was edited (that is a `replace`: delete + upload). Images the Store holds with no local counterpart are `remoteOnly` and are left alone — as is any server image absent from the manifest, so a damaged manifest cannot mass-delete screenshots.
 
+### "shortDescription … exceeds 500 characters" — but Microsoft's docs say 1,000
+
+The docs are wrong, or at least out of date: the API rejects anything past 500. pcenter checks it locally, so this arrives as exit 2 before a submission exists rather than as an opaque 400 with a draft to clean up.
+
+### "the size of KeywordsTotalCount must be 21 or less" — but every locale looks fine
+
+The cap is not on keywords per locale, nor on keywords in total. It is on **how many locales carry keywords at all**, across the whole submission, and the limit is 21. Adding keywords to a 22nd locale fails while each locale is individually valid. Clear the keywords on a locale you care less about, or leave the new one without them. pcenter checks this before creating a submission and names the locales it counted.
+
+### "Validation error: MissingTitle" from the Store, or a title required for a locale you are adding
+
+Partner Center draws a listing's product name from the package for that language. A listing language your packages do not include has nothing to draw from, so an empty `title` there fails the **whole submission** at commit — after the upload. pcenter reads the languages the packages advertise and checks this before the submission is created; the check is skipped when the packages advertise none. Give the locale a `title`, or drop the locale.
+
 ### An image is rejected before anything is created
 
 Validation runs locally, before a submission exists. The limits: PNG only, ≤ 50 MB, desktop screenshots ≥ 1366×768, icons exactly 300×300, ≤ 10 desktop screenshots per locale (≤ 8 for other device families), captions ≤ 200 characters. Full table in [Metadata directory](METADATA.md#validated-locally-before-anything-is-created).
@@ -156,9 +177,11 @@ Correct — the Submission API does not expose image binaries for download. Pull
 
 `publish msix` refuses to guess. Without this guard, a forgotten flag would silently ship the *previous* version's changelog. Pass the notes file, or say explicitly that keeping the cloned notes is what you meant.
 
+If you do not have a notes file yet, create one using the [release-notes format](METADATA.md#release-notes-file).
+
 ### "release notes file … is missing notes for Store listing locale(s): …"
 
-A locale exists in the Store but not in your notes file. This is a hard failure on purpose — an empty changelog in someone's language is worse than a failed command. Add the locales, or check what the Store actually has:
+A locale exists in the Store but not in your notes file. This is a hard failure on purpose — an empty changelog in someone's language is worse than a failed command. It usually means a language was added in Partner Center and the notes file was never told. Add the missing keys, or check what the Store actually has:
 
 ```bash
 pcenter locales list
@@ -180,7 +203,7 @@ Package uploads refresh the SAS URL if it expires mid-upload, so long uploads ar
 
 ### I piped the output and got JSON instead of a table
 
-That is the design: table on a terminal, JSON when piped, so an agent or a script gets machine-readable output without knowing to ask. Force either with `--output table` / `--output json`.
+That is expected: table at a terminal and JSON when piped. Force either with `--output table` or `--output json`.
 
 ### The error message is one line and I want the explanation
 

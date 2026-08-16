@@ -1,6 +1,6 @@
-# Automation contract — agents, scripts, CI
+# Automation reference
 
-`pcenter`'s primary consumers are agents and CI jobs, so the machine surface is the designed one, not an afterthought. This page is the contract: what you get on stdout, what you get on stderr when things fail, and what `$?` means.
+This page defines the output, errors, and exit codes for scripts, agents, and CI jobs.
 
 - [Output format](#output-format)
 - [Exit codes](#exit-codes)
@@ -8,16 +8,16 @@
 - [Success payloads](#success-payloads)
 - [Warnings](#warnings)
 - [Credentials](#credentials)
-- [Rules for agents](#rules-for-agents)
+- [Safe automation rules](#safe-automation-rules)
 - [Recipes](#recipes)
 
 ---
 
 ## Output format
 
-Table on a terminal, **JSON when piped**. An agent invoking `pcenter` through a pipe gets machine-readable output without knowing to ask for it. `--output json` or `--output table` forces either.
+Output is a table at a terminal and JSON when piped. `--output json` and `--output table` choose a format explicitly.
 
-Results are **bare data, not an envelope** — the same idiom as `gh` and `aws`, and jq-friendly. There is no `{"data": …}` wrapper to unwrap.
+Results contain bare data, without a `{"data": …}` wrapper.
 
 `--verbose` writes requests and response bodies to **stderr**, never stdout, so it never corrupts a JSON parse. The client secret, bearer tokens, and the SAS signature on upload URLs are redacted centrally; verbose output is safe to paste into an issue.
 
@@ -36,7 +36,7 @@ Branch on `$?` alone, without reading stdout:
 | `4` | Operation invalid for the current state (HTTP 409) | Permanent. **Never retry unchanged**; read the actual state first. |
 | `5` | Throttled beyond the retry budget | Retry later with backoff. |
 
-The 3/4/5 split exists because those three demand different responses. Collapsing them into `1` would force you to regex the message.
+Use the exit code to choose the next action; do not parse an error message.
 
 ---
 
@@ -70,7 +70,7 @@ With JSON output, a failure writes **one JSON object to stderr** and nothing to 
 
 ## Success payloads
 
-Typed, never stringly: booleans stay booleans (`draft`, `accepted`, `hasChanges`, `isPackageRollout`), numbers stay numbers (`packageRolloutPercentage`). `submission get` and `reviews list` pass the API's own JSON through untouched.
+Booleans and numbers stay typed. `submission get` and `reviews list` return the API JSON unchanged.
 
 **A list that is always present is always a list.** `listingChanges` and `imageChanges` are `[]` when empty, never `null`, so `len()` on them is safe without a nil check.
 
@@ -133,14 +133,14 @@ A missing credential tells you where `pcenter` looked and what to run. It never 
 
 ---
 
-## Rules for agents
+## Safe automation rules
 
 1. **Read before writing.** `listing show`, `submission status`, `rollout status` and `app info` are free and change nothing. Use them to establish state before any mutation.
-2. **`--dry-run` first.** `listing push --dry-run` prints the exact diff and the would-be request body without creating anything. There is no reason to skip it.
+2. **Use `--dry-run` first.** `listing push --dry-run` prints the diff and request body without creating anything.
 3. **Never retry on exit 4.** A 409 means the operation is invalid for the current state. Fetch the state, decide again.
-4. **One pending submission exists at a time.** The Store allows exactly one. If a mutation reports an existing draft, resolve it (`submission commit`, or `submission delete-draft --yes`) rather than passing `--replace-pending` blindly — that flag deletes whatever draft is there, including one a human left for inspection.
+4. **Resolve pending submissions deliberately.** The Store allows one. Do not pass `--replace-pending` blindly: it can delete a draft left for inspection. See [Troubleshooting](TROUBLESHOOTING.md#submissions).
 5. **`--skip-commit` is the safe half.** `publish msix --skip-commit` and `listing push --skip-commit` create a draft a human can inspect in Partner Center. Committing is a separate, explicit command.
-6. **Ask before committing.** `listing push --yes`, `publish msix` without `--skip-commit`, `submission commit`, `rollout halt --yes` and `submission delete-draft --yes` change what the public sees or destroy work. Confirm with the human first.
+6. **Ask before committing.** `listing push --yes`, `publish msix` without `--skip-commit`, `submission commit`, `rollout halt --yes`, and `submission delete-draft --yes` change public state or destroy work.
 7. **Timeouts are not failures.** The Store API returns 504 for operations that in fact succeeded, so every mutation verifies the resulting state rather than trusting the response code. Likewise, exhausting `--poll-attempts` means pcenter stopped watching, not that the submission failed — resume with `submission watch`.
 8. **Don't print `--include-upload-url` output.** It contains a live SAS credential.
 
@@ -163,18 +163,20 @@ pcenter submission status --output json | jq -r '.[] | "\(.type)\t\(.id)\t\(.sta
 **What would this listing change actually do?**
 
 ```bash
-pcenter listing push --dir assets/storecopy/microsoft-store --dry-run \
+pcenter listing push --dir store/microsoft --dry-run \
   | jq '{hasChanges, listingChanges, imageChanges, uploadCount}'
 ```
 
 **Release, then hand the watch off:**
 
 ```bash
-pcenter publish msix --path FeedFlow.msix --skip-commit \
-  --release-notes assets/storecopy/microsoft-store-release-notes.json
+pcenter publish msix --path MyApp.msix --skip-commit \
+  --release-notes store/microsoft-release-notes.json
 # inspect the draft in Partner Center, then:
 pcenter submission commit
 ```
+
+The notes file must include every Store locale. Use `pcenter locales list` to build it; its format is in [Release notes](METADATA.md#release-notes-file).
 
 **Rescue a rollout that stopped responding:**
 

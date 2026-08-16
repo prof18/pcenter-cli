@@ -92,14 +92,14 @@ Needs the repo to exist — test order and open questions in [08-release-testing
 - [x] Verify end to end: `brew install prof18/tap/pcenter` from the published tap reports `v0.0.1` at the tagged commit
   - Note for the maintainer's machine: `script/dev-install.sh` leaves `~/.local/bin/pcenter`, which shadows Homebrew's on PATH. Remove that symlink to test the released binary by name
 - [ ] feed-flow: seed metadata dir via `listing pull`, commit ([07-feedflow-integration.md](07-feedflow-integration.md) §1)
-- [ ] feed-flow: swap `windows-release.yml` to pinned `pcenter` (§3)
+- [x] feed-flow: swap `windows-release.yml` to pinned `pcenter` (§3) — done 2026-08-11, pinned `v0.0.3`. The publish is its own Linux job consuming the MSIX the Windows build job uploads: independently retryable after a long build, 1x billing, and it exercises the `linux/amd64` archive rather than the untested Windows one
 - [ ] After first green real release: delete the 3 ps1 scripts + `list-microsoft-store-locales.sh`, update docs/CLAUDE.md (§4–5)
-- [ ] During that release, walk Tier 2 of [09-manual-live-testing.md](09-manual-live-testing.md) (commit, watch, rollout status/set-percentage/finalize) — the only paths that cannot be exercised on demand
+- [ ] During that release, walk Tier 2 of [09-manual-live-testing.md](09-manual-live-testing.md) (commit, watch, rollout status/set-percentage/finalize) — the only paths that cannot be exercised on demand. The 1.16.1 release covered create → upload → commit → post-commit poll and left a 90% rollout; `rollout status` / `set-percentage` / `finalize` still to walk and record
 - [ ] After the first committed CLI-managed image exists, verify caption-only edits on an `Uploaded` image; fall back to replace if the API rejects them
 - [ ] Verify locale removal only when the maintainer explicitly authorizes deleting a Store listing locale
 
 Acceptance:
-- [ ] One real FeedFlow release published end-to-end through `pcenter` in CI
+- [x] One real FeedFlow release published end-to-end through `pcenter` in CI — FeedFlow `1.16.1`, 2026-08-16. The `Publish to Microsoft Store` job ran 4m52s on a Linux runner against the pinned `v0.0.3` `linux/amd64` archive: `auth doctor`, then `publish msix --release-notes … --rollout-percentage 90 --replace-pending`, creating, uploading, committing and polling the submission unattended
 - [ ] ps1 scripts removed from feed-flow
 
 ## Verify against the live API (referenced above)

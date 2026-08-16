@@ -1,6 +1,6 @@
 # Command reference
 
-Every `pcenter` command, its flags, what it does, and what it returns. `pcenter <command> --help` is the same information at the terminal and is always current with the binary you have; this page adds the behavior behind the flags.
+Every `pcenter` command, its flags, and command-specific behavior. `pcenter <command> --help` is always current for the binary you have.
 
 - [Global flags](#global-flags)
 - [`auth`](#auth) — credentials setup and diagnosis
@@ -13,7 +13,7 @@ Every `pcenter` command, its flags, what it does, and what it returns. `pcenter 
 - [`rollout`](#rollout) — `status`, `set-percentage`, `finalize`, `halt`
 - [`version`](#version)
 
-Conventions used throughout: output is a table on a terminal and JSON when piped (the full machine contract is in [AUTOMATION.md](AUTOMATION.md)); mutating commands never prompt; destructive ones need an explicit flag.
+Output is a table at a terminal and JSON when piped. For the full automation contract, see [AUTOMATION.md](AUTOMATION.md). Mutating commands never prompt; destructive ones need an explicit flag.
 
 ---
 
@@ -21,7 +21,7 @@ Conventions used throughout: output is a table on a terminal and JSON when piped
 
 | Flag | Meaning |
 | --- | --- |
-| `--app-id <product-id>` | Microsoft Store product id — the 12-character id from Partner Center, shaped like `9NXXXXXXXXXX`. Overrides `MS_STORE_APP_ID`. |
+| `--app-id <product-id>` | Microsoft Store product ID — the 12-character ID from Partner Center, for example `9NXXXXXXXXXX`. Overrides `MS_STORE_APP_ID`. |
 | `--env-file <path>` | Credentials file to read. Overrides `PCENTER_ENV_FILE`; default `~/.config/pcenter/credentials.env`. A leading `~` is expanded. |
 | `--output json\|table` | Force an output format instead of the TTY-aware default. |
 | `--verbose` | Log HTTP requests and response bodies to stderr, with secrets redacted. Safe to paste into an issue. |
@@ -82,9 +82,7 @@ Deletes the credentials file. Idempotent — a missing file is reported as `noth
 pcenter app info
 ```
 
-The application resource as the API returns it: id, name, package family and identity names, publisher, first published date, advanced-listing permission, and the ids of the published and pending submissions.
-
-It deliberately shows **no submission status**. The application resource carries only `{id, resourceLocation}` per submission, so a status column here could only ever be blank — [`submission status`](#submission-status) fetches the real thing.
+Shows app details, including its name, package names, publisher, first published date, and published and pending submission IDs. Use [`submission status`](#submission-status) for submission status.
 
 ---
 
@@ -169,11 +167,11 @@ Safety rails:
 - **Identity marker.** A push into a directory whose `store.json` names a different app fails before any request is sent. This is what stops one app's metadata reaching another — or an empty directory being read as "delete everything".
 - **Locale removal.** A locale on the server with no local file is an error unless `--allow-locale-removal` is passed, so an accidentally deleted file cannot drop a Store language.
 - **Image deletion is explicit.** A server image absent from the manifest is *retained*; removing one takes a `"delete": true` entry. A missing or damaged manifest cannot mass-delete screenshots.
-- **One pending submission.** The Store allows only one. An existing draft fails `--skip-commit` and `--yes` unless `--replace-pending` is given *and* that draft is in `PendingCommit`. `--dry-run` is unaffected — it creates nothing, so it previews and warns instead.
+- **One pending submission.** The Store allows only one. An existing draft fails `--skip-commit` and `--yes` unless `--replace-pending` is given *and* that draft is removable — never committed (`PendingCommit`) or finished in a failed state (`CommitFailed`, `CertificationFailed`, …). A submission genuinely in flight is never replaced. `--dry-run` is unaffected — it creates nothing, so it previews and warns instead.
 - **Previous rollout.** A rollout still in progress is finalized first — no new submission can be created while one is running.
 - **Cleanup.** Any failure after the draft was created but before commit deletes the draft (best-effort; a failure to clean up is reported as a warning, never swallowed).
 
-`--release-notes <json>` applies a [release-notes file](METADATA.md#release-notes-file) on top of the listing changes; without it, notes stay as cloned from the previous submission.
+`--release-notes <json>` applies release notes alongside the listing changes. Without it, the previous notes are preserved. See [Release notes](METADATA.md#release-notes-file) for the file format.
 
 The diff reports listing changes as `add` / `update` (with the field name) / `remove` per locale, and image changes as `add` / `replace` / `caption` / `delete`.
 
@@ -187,21 +185,16 @@ pcenter publish msix --path <msix> (--release-notes <json> | --keep-existing-rel
                      [--poll-seconds 30] [--poll-attempts 20]
 ```
 
-The full release path: create a submission, attach the package, upload it, commit it.
+This creates a submission, uploads the package, and commits it. It validates the package, rollout percentage, and release notes before creating a submission.
 
-1. Validate the MSIX path and the rollout percentage (`0 < n ≤ 100`).
-2. **Release-notes intent is mandatory** — either `--release-notes <json>` or an explicit `--keep-existing-release-notes`. Without this guard a forgotten flag would silently ship the *previous* version's changelog.
-3. Authenticate and fetch the app.
-4. Finalize the previous rollout if one is still in progress.
-5. Handle an existing pending draft: fail, unless `--replace-pending` and its status is `PendingCommit`, in which case delete it.
-6. Create the submission (cloned from the last published one).
-7. Apply release notes to **every** listing locale. A locale present in the Store but missing from the file is a **hard failure**, not a silently empty changelog; locales in the file that the Store does not have are a warning. Values are a string or an array of lines (joined with CRLF); locale matching is case-insensitive.
-8. Build and PUT the submission body with the package and rollout settings.
-9. ZIP the MSIX (stored, no compression) and upload it, refreshing the SAS URL if it expired mid-upload.
-10. `--skip-commit` stops here and prints the command to commit later. Otherwise: commit, verify, and poll to a terminal status.
-11. On any failure before the commit started, delete the draft (best-effort, warn if that fails). The temporary ZIP is always removed.
+- Provide `--release-notes <json>` or explicitly pass `--keep-existing-release-notes`. The file must include every Store locale; see [Release notes](METADATA.md#release-notes-file).
+- An existing rollout is finalized first. An existing pending submission stops the command unless `--replace-pending` can safely remove it.
+- `--skip-commit` leaves the new submission as a draft and prints the command to commit it later.
+- Before the commit starts, failures remove the new draft where possible and report cleanup failures as warnings.
 
-There is no `--yes`: the whole point of the command is the mutation, it runs unattended in CI, and step 2 already forces explicit intent for the risky part.
+There is no `--yes`: publishing is the command's purpose, and release-note intent is explicit.
+
+Unsupported settings are preserved from the previous submission. pcenter changes packages, rollout options, listings, and release notes. It always publishes immediately; scheduled dates set in Partner Center are not used.
 
 `--poll-seconds` / `--poll-attempts` bound the post-commit wait. Reaching the attempt limit is not a failure of the submission — it means pcenter stopped watching; use [`submission watch`](#submission-watch) to resume.
 
@@ -271,7 +264,7 @@ Sets the rollout percentage; `n` must satisfy `0 < n ≤ 100`. Prints the confir
 
 ### `rollout finalize`
 
-Takes the rollout to 100%. Uses the verify loop, so a timeout mid-finalize resolves to the actual state instead of leaving you guessing — this command alone would have fixed the CI failure that motivated the CLI.
+Takes the rollout to 100% and verifies the resulting state.
 
 ### `rollout halt --yes`
 

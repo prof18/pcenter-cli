@@ -1,6 +1,6 @@
 # Metadata directory and release notes
 
-Two file formats matter to `pcenter`: the **metadata directory** that holds your Store listing as text and images, and the **release-notes file** that supplies the changelog at release time. They are independent — release notes are never stored in the metadata directory, because a changelog belongs to a release and a listing does not.
+Two file formats matter to `pcenter`: the **metadata directory** for Store listing text and images, and the **release-notes file** for a release changelog. They are independent.
 
 - [Metadata directory](#metadata-directory)
 - [`store.json`](#storejson--identity-marker)
@@ -16,16 +16,16 @@ Two file formats matter to `pcenter`: the **metadata directory** that holds your
 `pcenter` is app-agnostic and receives the directory through `--dir`, so where it lives and whether you commit it are your choice. Two models both work:
 
 - **Committed** — the directory lives in your repo and is the source of truth for your Store copy. Listing changes then arrive as reviewable diffs, and `listing push --dry-run` makes a good pull-request check.
-- **Scratch** — the directory is a gitignored working area (`.pcenter/`, say) that you regenerate with `listing pull` whenever you need it. Right when your Store copy is already maintained elsewhere — a translation pipeline, for instance — and committing this would create a second source of truth in a second format.
+- **Scratch** — the directory is a gitignored working area (`.pcenter/`, for example) that you regenerate with `listing pull`. Use this when another system, such as a translation pipeline, owns the Store copy.
 
 Pick the scratch model if something else already owns the text; pick the committed model if nothing does. Either way, create the directory with `pcenter listing pull`:
 
 ```bash
-pcenter listing pull --dir assets/storecopy/microsoft-store --app-id 9NXXXXXXXXXX
+pcenter listing pull --dir store/microsoft --app-id 9NXXXXXXXXXX
 ```
 
 ```
-microsoft-store/
+microsoft/
   store.json              # identity marker, written by pull
   listings/
     en-us.json            # one file per Store locale, lowercase filenames
@@ -51,7 +51,7 @@ Locale handling is case-insensitive throughout; the canonical form on disk is lo
   "appId": "9NXXXXXXXXXX",
   "pulledAt": "2026-07-09T12:00:00Z",
   "sourceSubmissionId": "1152921504621442252",
-  "generatedBy": "pcenter 0.0.1"
+  "generatedBy": "pcenter v0.0.3"
 }
 ```
 
@@ -65,7 +65,7 @@ Editable base-listing text fields only:
 
 ```json
 {
-  "title": "FeedFlow",
+  "title": "My App",
   "description": "…",
   "shortDescription": "…",
   "features": ["…", "…"],
@@ -109,8 +109,7 @@ keywords to a 22nd locale fails with `The size of KeywordsTotalCount must be 21 
 even though every locale is individually valid. To add a new one, clear the keywords on
 another locale first.
 
-pcenter checks all of these before creating a submission, because the alternative is a 400
-from the Ingestion API *after* a draft exists — which then has to be cleaned up.
+pcenter checks these before creating a submission.
 
 **Adding a locale** is adding a `listings/<locale>.json` file. **Removing a locale** — deleting the file — is an error unless `listing push --allow-locale-removal` is passed, so an accidental deletion cannot drop a Store language.
 
@@ -127,7 +126,7 @@ Image binaries **cannot be downloaded** through the Submission API. `pull` there
       {
         "localPath": "en-us/screenshot-01.png",
         "imageType": "Screenshot",
-        "description": "Your feeds, one place",
+        "description": "Everything in one place",
         "storeId": "abc123",
         "sha256": "…"
       },
@@ -220,4 +219,4 @@ A JSON file keyed by locale, passed to `publish msix --release-notes` or `listin
 
 **A Store locale missing from the file is a hard failure.** The alternative — shipping an empty changelog for a language — is worse than a failed command. A locale in the file that the Store does not have is a warning, so pruning a language from the Store does not break your release.
 
-Keep this file wherever your release process wants it; it is unrelated to the metadata directory. FeedFlow keeps it at `assets/storecopy/microsoft-store-release-notes.json`.
+Keep this file wherever your release process wants it; it is unrelated to the metadata directory. The examples in these pages use `store/microsoft-release-notes.json` next to a `store/microsoft/` metadata directory, but nothing in `pcenter` depends on either name — both are passed in as paths.
