@@ -9,8 +9,12 @@ that has no section, so this file cannot fall behind.
 `pcenter analytics acquisitions` reports how many times the app was acquired, per day, week
 or month, the same numbers as the Acquisitions report in Partner Center. `--group-by` breaks
 the counts down by OS version, market, device type and the other dimensions the Store
-records. JSON output is one row per period and breakdown, with an integer
-`acquisitionQuantity`, so a script can sum it directly. It needs no new credentials.
+records. JSON output is one row per period and breakdown, so a script can sum
+`acquisitionQuantity` directly. It needs no new credentials.
+
+Following a `@nextLink` from the analytics API now works for every form the API returns.
+Some endpoints send a link relative to the analytics folder, with the filter not encoded;
+`reviews list --all` would have requested the wrong URL for one of those.
 
 ## 0.0.3
 

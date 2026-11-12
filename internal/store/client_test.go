@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -154,10 +155,10 @@ func TestClientReadsSubmissionRolloutAndReviews(t *testing.T) {
 			"published": {IsPackageRollout: true, PackageRolloutPercentage: 90, PackageRolloutStatus: "PackageRolloutInProgress", FallbackSubmissionID: "fallback"},
 		},
 		ReviewPages: []fakestore.ReviewPage{{Value: []json.RawMessage{json.RawMessage(`{"id":"review","rating":5}`)}, TotalCount: 1}},
-		AcquisitionPages: []fakestore.ReviewPage{
-			{Value: []json.RawMessage{json.RawMessage(`{"date":"2026-07-01","osVersion":"Windows 11","acquisitionQuantity":4.0}`)}, TotalCount: 2},
+		AnalyticsPages: map[string][]fakestore.ReviewPage{"appacquisitions": {
+			{Value: []json.RawMessage{json.RawMessage(`{"date":"2026-07-01","acquisitionQuantity":4.0}`)}, TotalCount: 2},
 			{Value: []json.RawMessage{json.RawMessage(`{"date":"2026-07-02","acquisitionQuantity":1}`)}, TotalCount: 2},
-		},
+		}},
 	})
 	client := newTestClient(t, server, &fakeClock{now: time.Now()})
 
@@ -171,13 +172,21 @@ func TestClientReadsSubmissionRolloutAndReviews(t *testing.T) {
 	if err != nil || len(page.Value) != 1 || page.TotalCount != 1 {
 		t.Fatalf("reviews = %+v, error = %v", page, err)
 	}
-	acquisitions, err := client.AppAcquisitions(context.Background(), store.AcquisitionQuery{ApplicationID: "APP", GroupBy: "date,osVersion", Top: 10000, Skip: 0})
-	if err != nil || len(acquisitions.Value) != 1 || acquisitions.Value[0].OSVersion != "Windows 11" || acquisitions.Value[0].AcquisitionQuantity != 4 || acquisitions.NextLink == "" {
+	// The fake returns the relative, unencoded @nextLink the live usage API
+	// sends ("appacquisitions?…filter=market eq 'US'&skip=1"); following it
+	// must reach the analytics folder, not the API root.
+	acquisitions, err := client.Analytics(context.Background(), "appacquisitions", url.Values{"applicationId": {"APP"}, "skip": {"0"}})
+	if err != nil || len(acquisitions.Value) != 1 || !strings.HasPrefix(acquisitions.NextLink, "appacquisitions?") {
 		t.Fatalf("acquisitions = %+v, error = %v", acquisitions, err)
 	}
-	next, err := client.AppAcquisitionsNext(context.Background(), acquisitions.NextLink)
-	if err != nil || len(next.Value) != 1 || next.Value[0].Date != "2026-07-02" || next.NextLink != "" {
+	next, err := client.AnalyticsNext(context.Background(), acquisitions.NextLink)
+	if err != nil || len(next.Value) != 1 || !strings.Contains(string(next.Value[0]), "2026-07-02") || next.NextLink != "" {
 		t.Fatalf("next acquisitions = %+v, error = %v", next, err)
+	}
+	for _, request := range server.Journal() {
+		if request.Path == "/v1.0/my/analytics/appacquisitions" && strings.Contains(request.Query, "skip=1") && !strings.Contains(request.Query, "filter=market+eq+%27US%27") {
+			t.Fatalf("next link query was not re-encoded: %s", request.Query)
+		}
 	}
 }
 

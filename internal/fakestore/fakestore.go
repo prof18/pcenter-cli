@@ -80,12 +80,14 @@ type MutationScenario struct {
 
 // Options defines initial fake state and scripted failures.
 type Options struct {
-	AppID               string
-	App                 App
-	Submissions         map[string]json.RawMessage
-	Rollouts            map[string]Rollout
-	ReviewPages         []ReviewPage
-	AcquisitionPages    []ReviewPage
+	AppID       string
+	App         App
+	Submissions map[string]json.RawMessage
+	Rollouts    map[string]Rollout
+	ReviewPages []ReviewPage
+	// AnalyticsPages serves other analytics endpoints, keyed by endpoint name
+	// ("appacquisitions", "failurehits", …).
+	AnalyticsPages      map[string][]ReviewPage
 	Failures            []Failure
 	Responses           []Response
 	AccessToken         string
@@ -237,8 +239,8 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		s.handleSubmissionGET(w, r)
 	case r.Method == http.MethodGet && r.URL.Path == "/v1.0/my/analytics/reviews":
 		s.handlePaged(w, r, s.options.ReviewPages, "reviews")
-	case r.Method == http.MethodGet && r.URL.Path == "/v1.0/my/analytics/appacquisitions":
-		s.handlePaged(w, r, s.options.AcquisitionPages, "appacquisitions")
+	case r.Method == http.MethodGet && s.isAnalyticsEndpoint(r.URL.Path):
+		s.handlePaged(w, r, s.options.AnalyticsPages[strings.TrimPrefix(r.URL.Path, "/v1.0/my/analytics/")], strings.TrimPrefix(r.URL.Path, "/v1.0/my/analytics/"))
 	default:
 		if !s.handleCannedResponse(w, r) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "fake endpoint not found"})
@@ -667,6 +669,15 @@ func cloneStatusQueues(source map[string][]string) map[string][]string {
 	return result
 }
 
+func (s *Server) isAnalyticsEndpoint(path string) bool {
+	endpoint, ok := strings.CutPrefix(path, "/v1.0/my/analytics/")
+	if !ok {
+		return false
+	}
+	_, ok = s.options.AnalyticsPages[endpoint]
+	return ok
+}
+
 // handlePaged serves an analytics endpoint whose pages are addressed by skip,
 // linking each page to the next the way the live API does with @nextLink.
 func (s *Server) handlePaged(w http.ResponseWriter, r *http.Request, pages []ReviewPage, endpoint string) {
@@ -689,7 +700,14 @@ func (s *Server) handlePaged(w http.ResponseWriter, r *http.Request, pages []Rev
 		"TotalCount": pages[page].TotalCount,
 	}
 	if page+1 < len(pages) {
-		payload["@nextLink"] = fmt.Sprintf("/v1.0/my/analytics/%s?applicationId=%s&skip=%d", endpoint, s.options.AppID, page+1)
+		// Reviews link from the API root; the other endpoints use the bare
+		// relative form ("usagedaily?…") with an unencoded filter, which is
+		// what the live usage API returns.
+		if endpoint == "reviews" {
+			payload["@nextLink"] = fmt.Sprintf("/v1.0/my/analytics/%s?applicationId=%s&skip=%d", endpoint, s.options.AppID, page+1)
+		} else {
+			payload["@nextLink"] = fmt.Sprintf("%s?applicationId=%s&filter=market eq 'US'&skip=%d", endpoint, s.options.AppID, page+1)
+		}
 	}
 	writeJSON(w, http.StatusOK, payload)
 }

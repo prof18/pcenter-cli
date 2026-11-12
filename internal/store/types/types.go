@@ -73,28 +73,11 @@ type Review struct {
 	PackageVersion string `json:"packageVersion"`
 }
 
-// AcquisitionPage is a page from the analytics app acquisitions API.
-type AcquisitionPage struct {
-	Value                  []Acquisition `json:"Value"`
-	TotalCount             int           `json:"TotalCount"`
-	NextLink               string        `json:"@nextLink,omitempty"`
-	DataFreshnessTimestamp string        `json:"DataFreshnessTimestamp,omitempty"`
-}
-
-// Acquisition is one aggregated row. Dimension fields are empty unless the
-// request grouped by them. The quantity is documented as a number, so it is
-// decoded as one rather than trusted to be an integer on the wire.
-type Acquisition struct {
-	Date                string  `json:"date"`
-	ApplicationID       string  `json:"applicationId"`
-	ApplicationName     string  `json:"applicationName,omitempty"`
-	AcquisitionType     string  `json:"acquisitionType,omitempty"`
-	AgeGroup            string  `json:"ageGroup,omitempty"`
-	StoreClient         string  `json:"storeClient,omitempty"`
-	Gender              string  `json:"gender,omitempty"`
-	Market              string  `json:"market,omitempty"`
-	OSVersion           string  `json:"osVersion,omitempty"`
-	DeviceType          string  `json:"deviceType,omitempty"`
-	OrderName           string  `json:"orderName,omitempty"`
-	AcquisitionQuantity float64 `json:"acquisitionQuantity"`
+// AnalyticsPage is one page from any Store analytics endpoint. Rows stay raw:
+// the endpoints share paging but not row shapes, and each command picks the
+// fields it reports.
+type AnalyticsPage struct {
+	Value      []json.RawMessage `json:"Value"`
+	TotalCount int               `json:"TotalCount"`
+	NextLink   string            `json:"@nextLink,omitempty"`
 }
