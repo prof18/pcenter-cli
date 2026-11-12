@@ -258,52 +258,58 @@ func (c *Client) Reviews(ctx context.Context, query ReviewQuery) (storetypes.Rev
 
 // ReviewsNext follows a relative or absolute @nextLink.
 func (c *Client) ReviewsNext(ctx context.Context, nextLink string) (storetypes.ReviewPage, error) {
+	link, err := c.analyticsLink(nextLink)
+	if err != nil {
+		return storetypes.ReviewPage{}, err
+	}
 	var result storetypes.ReviewPage
-	err := c.getJSON(ctx, nextLink, &result)
+	err = c.getJSON(ctx, link, &result)
 	return result, err
 }
 
-// AcquisitionQuery contains documented app acquisitions endpoint parameters.
-type AcquisitionQuery struct {
-	ApplicationID    string
-	StartDate        string
-	EndDate          string
-	AggregationLevel string
-	GroupBy          string
-	Filter           string
-	OrderBy          string
-	Top              int
-	Skip             int
-}
-
-// AppAcquisitions gets one page of aggregated acquisitions.
-func (c *Client) AppAcquisitions(ctx context.Context, query AcquisitionQuery) (storetypes.AcquisitionPage, error) {
-	values := url.Values{}
-	values.Set("applicationId", query.ApplicationID)
-	for key, value := range map[string]string{
-		"startDate": query.StartDate, "endDate": query.EndDate, "aggregationLevel": query.AggregationLevel,
-		"groupby": query.GroupBy, "filter": query.Filter, "orderby": query.OrderBy,
-	} {
-		if value != "" {
-			values.Set(key, value)
-		}
-	}
-	if query.Top > 0 {
-		values.Set("top", strconv.Itoa(query.Top))
-	}
-	if query.Skip >= 0 {
-		values.Set("skip", strconv.Itoa(query.Skip))
-	}
-	var result storetypes.AcquisitionPage
-	err := c.getJSON(ctx, "/analytics/appacquisitions?"+values.Encode(), &result)
+// Analytics gets one page from a Store analytics endpoint, such as
+// "appacquisitions" or "failurehits". Parameters are passed through: the
+// endpoints differ in which ones they accept.
+func (c *Client) Analytics(ctx context.Context, endpoint string, query url.Values) (storetypes.AnalyticsPage, error) {
+	var result storetypes.AnalyticsPage
+	err := c.getJSON(ctx, "/analytics/"+url.PathEscape(endpoint)+"?"+query.Encode(), &result)
 	return result, err
 }
 
-// AppAcquisitionsNext follows a relative or absolute @nextLink.
-func (c *Client) AppAcquisitionsNext(ctx context.Context, nextLink string) (storetypes.AcquisitionPage, error) {
-	var result storetypes.AcquisitionPage
-	err := c.getJSON(ctx, nextLink, &result)
+// AnalyticsNext follows an analytics @nextLink.
+func (c *Client) AnalyticsNext(ctx context.Context, nextLink string) (storetypes.AnalyticsPage, error) {
+	link, err := c.analyticsLink(nextLink)
+	if err != nil {
+		return storetypes.AnalyticsPage{}, err
+	}
+	var result storetypes.AnalyticsPage
+	err = c.getJSON(ctx, link, &result)
 	return result, err
+}
+
+// analyticsLink makes an @nextLink requestable. The analytics API returns it
+// in several forms: absolute, rooted at /v1.0/my/, or relative to the
+// analytics folder ("usagedaily?…&skip=10"), and with the query not encoded
+// (spaces and quotes from the filter). A relative link resolves against the
+// analytics folder rather than the API root, and the query is re-encoded so
+// the request line stays valid.
+func (c *Client) analyticsLink(nextLink string) (string, error) {
+	base, err := url.Parse(c.apiBase + "/analytics/")
+	if err != nil {
+		return "", fmt.Errorf("parse API base: %w", err)
+	}
+	path, rawQuery, _ := strings.Cut(nextLink, "?")
+	reference, err := url.Parse(path)
+	if err != nil {
+		return "", fmt.Errorf("parse @nextLink: %w", err)
+	}
+	resolved := base.ResolveReference(reference)
+	query, err := url.ParseQuery(rawQuery)
+	if err != nil {
+		return "", fmt.Errorf("parse @nextLink query: %w", err)
+	}
+	resolved.RawQuery = query.Encode()
+	return resolved.String(), nil
 }
 
 func (c *Client) getJSON(ctx context.Context, path string, destination any) error {

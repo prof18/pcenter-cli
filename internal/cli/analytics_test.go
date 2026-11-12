@@ -11,62 +11,87 @@ import (
 	"github.com/prof18/pcenter-cli/internal/output"
 )
 
-// acquisitionServer serves two acquisition pages in the live response shape,
-// including the purchase fields pcenter drops and a fractional-looking number.
+// analyticsServer serves one analytics endpoint from raw row pages, in the
+// live response shape.
+func analyticsServer(t *testing.T, endpoint string, pages ...[]string) *fakestore.Server {
+	t.Helper()
+	fakePages := make([]fakestore.ReviewPage, 0, len(pages))
+	for _, page := range pages {
+		value := make([]json.RawMessage, 0, len(page))
+		for _, row := range page {
+			value = append(value, json.RawMessage(row))
+		}
+		fakePages = append(fakePages, fakestore.ReviewPage{Value: value})
+	}
+	return fakestore.New(t, fakestore.Options{
+		AppID:          "APP",
+		App:            fakestore.App{ID: "APP"},
+		AnalyticsPages: map[string][]fakestore.ReviewPage{endpoint: fakePages},
+	})
+}
+
+// analyticsRequests returns the parsed queries sent to one endpoint.
+func analyticsRequests(t *testing.T, server *fakestore.Server, endpoint string) []map[string]string {
+	t.Helper()
+	var queries []map[string]string
+	for _, request := range server.Journal() {
+		if request.Path != "/v1.0/my/analytics/"+endpoint {
+			continue
+		}
+		query, err := urlParseQuery(request.Query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		queries = append(queries, query)
+	}
+	return queries
+}
+
+// runAnalytics runs a command against the server and returns its stdout.
+func runAnalytics(t *testing.T, server *fakestore.Server, args ...string) string {
+	t.Helper()
+	stdout, stderr, exitCode := execute(t, fakeEnvironment(server), append([]string{"--output", "json", "analytics"}, args...), cli.BuildInfo{})
+	if exitCode != output.ExitSuccess || stderr != "" {
+		t.Fatalf("%v exit = %d stderr = %q", args, exitCode, stderr)
+	}
+	return strings.TrimSpace(stdout)
+}
+
 func acquisitionServer(t *testing.T) *fakestore.Server {
 	t.Helper()
-	return fakestore.New(t, fakestore.Options{
-		AppID: "APP",
-		App:   fakestore.App{ID: "APP"},
-		AcquisitionPages: []fakestore.ReviewPage{
-			{Value: []json.RawMessage{
-				json.RawMessage(`{"applicationId":"APP","date":"2026-07-01","osVersion":"Windows 11","market":"US","acquisitionQuantity":3.0,"purchasePriceUSDAmount":0.0}`),
-				json.RawMessage(`{"applicationId":"APP","date":"2026-07-01","osVersion":"Windows 10","market":"IT","acquisitionQuantity":2}`),
-			}, TotalCount: 3},
-			{Value: []json.RawMessage{
-				json.RawMessage(`{"applicationId":"APP","date":"2026-07-02","osVersion":"Windows 11","market":"US","acquisitionQuantity":5}`),
-			}, TotalCount: 3},
+	return analyticsServer(t, "appacquisitions",
+		[]string{
+			`{"applicationId":"APP","date":"2026-07-01","osVersion":"Windows 11","market":"US","deviceType":null,"acquisitionQuantity":3.0,"purchasePriceUSDAmount":0.0}`,
+			`{"applicationId":"APP","date":"2026-07-01","osVersion":"Windows 10","market":"IT","acquisitionQuantity":2}`,
 		},
-	})
+		[]string{`{"applicationId":"APP","date":"2026-07-02","osVersion":"Windows 11","market":"US","acquisitionQuantity":5}`},
+	)
 }
 
 func TestAnalyticsAcquisitionsFollowsPagesAndNormalizesRows(t *testing.T) {
 	t.Parallel()
 	server := acquisitionServer(t)
-	stdout, stderr, exitCode := execute(t, fakeEnvironment(server), []string{
-		"--output", "json", "analytics", "acquisitions", "--from", "2026-07-01", "--to", "2026-07-02",
-		"--group-by", "osversion, market,date", "--market", "US",
-	}, cli.BuildInfo{})
-	if exitCode != output.ExitSuccess || stderr != "" {
-		t.Fatalf("exit = %d stderr = %q", exitCode, stderr)
-	}
-	want := `[{"date":"2026-07-01","acquisitionQuantity":3,"osVersion":"Windows 11","market":"US"},` +
-		`{"date":"2026-07-01","acquisitionQuantity":2,"osVersion":"Windows 10","market":"IT"},` +
-		`{"date":"2026-07-02","acquisitionQuantity":5,"osVersion":"Windows 11","market":"US"}]`
-	if strings.TrimSpace(stdout) != want {
+	stdout := runAnalytics(t, server, "acquisitions", "--from", "2026-07-01", "--to", "2026-07-02",
+		"--group-by", "osversion, market,date", "--market", "US")
+	// Fields come in a fixed order (date, dimensions, metrics); nulls and
+	// ungrouped fields are dropped; 3.0 is reported as 3.
+	want := `[{"date":"2026-07-01","osVersion":"Windows 11","market":"US","acquisitionQuantity":3,"purchasePriceUSDAmount":0},` +
+		`{"date":"2026-07-01","osVersion":"Windows 10","market":"IT","acquisitionQuantity":2},` +
+		`{"date":"2026-07-02","osVersion":"Windows 11","market":"US","acquisitionQuantity":5}]`
+	if stdout != want {
 		t.Fatalf("stdout = %s\nwant   = %s", stdout, want)
 	}
-
-	var requests []fakestore.Request
-	for _, request := range server.Journal() {
-		if request.Path == "/v1.0/my/analytics/appacquisitions" {
-			requests = append(requests, request)
-		}
-	}
+	requests := analyticsRequests(t, server, "appacquisitions")
 	if len(requests) != 2 {
 		t.Fatalf("acquisition requests = %d, want 2", len(requests))
-	}
-	query, err := urlParseQuery(requests[0].Query)
-	if err != nil {
-		t.Fatal(err)
 	}
 	expected := map[string]string{
 		"applicationId": "APP", "startDate": "7/1/2026", "endDate": "7/2/2026", "aggregationLevel": "day",
 		"groupby": "date,osVersion,market", "filter": "market eq 'US'", "orderby": "date", "top": "10000", "skip": "0",
 	}
 	for key, value := range expected {
-		if query[key] != value {
-			t.Fatalf("query[%s] = %q, want %q (query %+v)", key, query[key], value, query)
+		if requests[0][key] != value {
+			t.Fatalf("query[%s] = %q, want %q (query %+v)", key, requests[0][key], value, requests[0])
 		}
 	}
 }
@@ -81,20 +106,10 @@ func TestAnalyticsAcquisitionsDefaultsToPerDayTotalsEndingToday(t *testing.T) {
 		t.Fatalf("exit = %d stderr = %q", exitCode, stderr)
 	}
 	lines := strings.Split(strings.TrimSpace(stdout), "\n")
-	if len(lines) != 4 || strings.Fields(lines[0])[0] != "DATE" || strings.Fields(lines[0])[1] != "ACQUISITIONS" {
+	if len(lines) != 4 || strings.Fields(lines[0])[0] != "DATE" || strings.Fields(lines[0])[1] != "ACQUISITIONQUANTITY" {
 		t.Fatalf("table = %q", stdout)
 	}
-	var first string
-	for _, request := range server.Journal() {
-		if request.Path == "/v1.0/my/analytics/appacquisitions" {
-			first = request.Query
-			break
-		}
-	}
-	query, err := urlParseQuery(first)
-	if err != nil {
-		t.Fatal(err)
-	}
+	query := analyticsRequests(t, server, "appacquisitions")[0]
 	// The test clock is 2026-07-13.
 	if query["endDate"] != "7/13/2026" || query["groupby"] != "date" {
 		t.Fatalf("query = %+v", query)
