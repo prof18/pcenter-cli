@@ -252,16 +252,25 @@ func sortAndTrimByDate(rows []analyticsRow, lastDay string) []analyticsRow {
 			kept = append(kept, row)
 		}
 	}
-	sort.SliceStable(kept, func(i, j int) bool { return rowDay(kept[i]) < rowDay(kept[j]) })
+	// The full value orders hourly rows within a day; dates are normalized,
+	// so plain string order is chronological.
+	sort.SliceStable(kept, func(i, j int) bool { return rowDate(kept[i]) < rowDate(kept[j]) })
 	return kept
 }
 
-func rowDay(row analyticsRow) string {
+func rowDate(row analyticsRow) string {
 	var date string
-	if err := json.Unmarshal(row.values["date"], &date); err != nil || len(date) < 10 {
+	if err := json.Unmarshal(row.values["date"], &date); err != nil {
 		return ""
 	}
-	return date[:10]
+	return date
+}
+
+func rowDay(row analyticsRow) string {
+	if date := rowDate(row); len(date) >= 10 {
+		return date[:10]
+	}
+	return ""
 }
 
 // analyticsGroupBy validates the breakdown, case-insensitively, and always

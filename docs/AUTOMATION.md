@@ -86,7 +86,7 @@ Booleans and numbers stay typed. `submission get` and `reviews list` return the 
 | `app info` | The application resource: `{id, primaryName, packageFamilyName, packageIdentityName, publisherName, firstPublishedDate, hasAdvancedListingPermission, lastPublishedApplicationSubmission, pendingApplicationSubmission}` |
 | `locales list` | `["en-us", "it", …]` — a bare string array |
 | `reviews list` | The API's review objects, unmodified |
-| `analytics …` | `[{date, <group-by dimensions…>, <metrics…>}]`, fields in that order, nulls left out. Each command's dimensions and metrics are in [COMMANDS.md](COMMANDS.md#analytics) |
+| `analytics …` | Most commands: `[{date, <group-by dimensions…>, <metrics…>}]`, fields in that order, nulls left out. `funnel` has no date: `[{metricType, userCount}]`. `failures details`, `failures stacktrace` and `insights` return the API's rows minus nulls; `insights` rows are nested. Each command's fields are in [COMMANDS.md](COMMANDS.md#analytics) |
 | `submission status` | `[{type: "published"\|"pending", id, status, statusDetails}]` |
 | `submission get` | The raw submission JSON (`fileUploadUrl` redacted unless `--include-upload-url`) |
 | `submission watch` | `{status, statusDetails, classification: "success"\|"failed"\|"neutral"\|"in-progress", warning?}` — `in-progress` plus a `warning` means the poll budget ran out, not that anything is wrong; exit 0 |
