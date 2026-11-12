@@ -321,3 +321,16 @@ func TestAnalyticsInsightsComposesTheRequiredDataTypeFilter(t *testing.T) {
 		t.Fatalf("unknown data type exit = %d", exitCode)
 	}
 }
+
+func TestAnalyticsSortsHourlyRowsWithinADay(t *testing.T) {
+	t.Parallel()
+	server := analyticsServer(t, "failurehits", []string{
+		`{"date":"2026-07-02 09:00:00","eventCount":1}`,
+		`{"date":"2026-07-02 08:00:00","eventCount":2}`,
+		`{"date":"2026-07-03 01:00:00","eventCount":3}`,
+	})
+	stdout := runAnalytics(t, server, "failures", "list", "--from", "2026-07-01", "--to", "2026-07-02", "--aggregation", "hour")
+	if want := `[{"date":"2026-07-02T08:00:00","eventCount":2},{"date":"2026-07-02T09:00:00","eventCount":1}]`; stdout != want {
+		t.Fatalf("stdout = %s, want %s", stdout, want)
+	}
+}
