@@ -184,6 +184,15 @@ How many users reached each step from the Store page to using the app, over the 
 
 The API spells the acquisition step `Acqusition`; pcenter reports it as `Acquisition`, as Microsoft's docs do.
 
+### `analytics conversions`
+
+Clicks on the app's Store listing and the conversions (new licences) they led to, by channel.
+
+- Dimensions: `channelType` (`Store Traffic`, `CustomCampaignId`, `Other`), `customCampaignId`, `referrerUriDomain`, `market`, `deviceType`, `storeClient`, `appType`.
+- Metrics: `clickCount`, `conversionCount`.
+- Always daily: the API ignores an aggregation level, so there is no `--aggregation`.
+- `conversionCount` is Microsoft's own count of new licences attributed to a listing click. It can be `0` while `acquisitions` and `funnel` show downloads.
+
 ---
 
 ## `listing`
