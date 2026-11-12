@@ -205,6 +205,18 @@ Add-on (in-app product) analytics. Each row carries the add-on's Store ID, so ro
 
 Without the id flag each command covers all of the app's add-ons. `addons conversions` is always daily, like `conversions`.
 
+### `analytics failures list`, `failures details`, `failures stacktrace`
+
+Crashes, hangs, memory failures and JavaScript errors: the Failures section of Partner Center's Health report. The API keeps the last 30 days.
+
+- `failures list` counts them. Dimensions: `eventType` (`crash`, `hang`, `memory`, `jse`), `failureName`, `failureHash`, `symbol`, `packageVersion`, `packageName`, `osVersion`, `osRelease`, `market`, `deviceType`. Metrics: `eventCount`, `deviceCount`. `--aggregation` is `day` or `hour`; hourly covers the last 72 hours and dates carry a time (`2026-11-12T09:00:00`). The API accepts `week` and `month` but returns daily rows, so pcenter does not offer them.
+- `failures details --failure-hash <hash>` lists the individual reports behind one failure: date, market, device model, OS build, package version, and a `cabId`. Get the hash from `failures list --group-by failureHash`.
+- `failures stacktrace --cab-id <id>` shows one report's stack, a row per frame: `level`, `image`, `function`, `offset`, `isBlamedFrame`. It takes no dates.
+
+`details` and `stacktrace` return the API's fields as they come, minus nulls.
+
+A failure the Store could not bucket has an empty `failureHash`, and no details or stack trace can be fetched for it. Every FeedFlow failure looks like this, so `details` and `stacktrace` follow Microsoft's reference and are not yet checked against live data.
+
 ---
 
 ## `listing`

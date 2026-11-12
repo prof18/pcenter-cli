@@ -31,6 +31,10 @@ to, by channel and promotion campaign.
 same for add-ons. Subscriptions include renewals, active counts, churn by reason and gross
 sales.
 
+`pcenter analytics failures list` counts crashes and hangs per day or hour, by failure,
+package version, OS and device. `failures details` and `failures stacktrace` drill into one
+failure's reports and stack frames, when the Store has bucketed it.
+
 Following a `@nextLink` from the analytics API now works for every form the API returns.
 Some endpoints send a link relative to the analytics folder, with the filter not encoded.
 `reviews list --all` resolved such a link against the wrong folder.

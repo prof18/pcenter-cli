@@ -259,3 +259,46 @@ func TestAnalyticsAddOnsKeepTheAddOnIDAndPassItsFilter(t *testing.T) {
 		t.Fatalf("subscriptions must send no top or skip: %+v", query)
 	}
 }
+
+func TestAnalyticsFailuresListDetailsAndStackTrace(t *testing.T) {
+	t.Parallel()
+	server := analyticsServer(t, "failurehits", []string{
+		`{"date":"2026-07-05","applicationId":"APP","failureName":"","failureHash":"","symbol":null,"eventType":"crash","packageVersion":"1.20.0.0","osVersion":null,"deviceCount":1.0,"eventCount":1.05263157894737}`,
+	})
+	stdout := runAnalytics(t, server, "failures", "list", "--from", "2026-07-01", "--group-by", "eventType,failureHash,packageVersion")
+	// An unbucketed failure keeps its empty hash: "" is data, null is not.
+	if want := `[{"date":"2026-07-05","eventType":"crash","failureHash":"","packageVersion":"1.20.0.0","eventCount":1.05263157894737,"deviceCount":1}]`; stdout != want {
+		t.Fatalf("list stdout = %s, want %s", stdout, want)
+	}
+	if query := analyticsRequests(t, server, "failurehits")[0]; query["orderby"] != "" {
+		t.Fatalf("failurehits only orders by groupby fields: %+v", query)
+	}
+
+	server = analyticsServer(t, "failuredetails", []string{
+		`{"date":"2026-07-12 00:00:00","cabExpirationTime":"2026-08-16 01:37:00","cabDownloadable":false,"failureHash":"hash","cabId":"118","osBuild":"10.0.19043","praid":null}`,
+	})
+	stdout = runAnalytics(t, server, "failures", "details", "--from", "2026-07-01", "--failure-hash", "hash")
+	if want := `[{"date":"2026-07-12","cabExpirationTime":"2026-08-16 01:37:00","cabDownloadable":false,"failureHash":"hash","cabId":"118","osBuild":"10.0.19043"}]`; stdout != want {
+		t.Fatalf("details stdout = %s, want %s", stdout, want)
+	}
+	if query := analyticsRequests(t, server, "failuredetails")[0]; query["failureHash"] != "hash" {
+		t.Fatalf("query = %+v", query)
+	}
+
+	server = analyticsServer(t, "stacktrace", []string{
+		`{"level":"0","image":"FeedFlow","function":"HANG_QUIESCE","offset":"0x0","isBlamedFrame":true}`,
+	})
+	stdout = runAnalytics(t, server, "failures", "stacktrace", "--cab-id", "118")
+	if want := `[{"level":"0","image":"FeedFlow","function":"HANG_QUIESCE","offset":"0x0","isBlamedFrame":true}]`; stdout != want {
+		t.Fatalf("stacktrace stdout = %s, want %s", stdout, want)
+	}
+	query := analyticsRequests(t, server, "stacktrace")[0]
+	if query["cabId"] != "118" || query["startDate"] != "" || query["top"] != "" {
+		t.Fatalf("stacktrace takes only the CAB id: %+v", query)
+	}
+
+	_, stderr, exitCode := execute(t, fakeEnvironment(server), []string{"--output", "json", "analytics", "failures", "stacktrace"}, cli.BuildInfo{})
+	if exitCode != output.ExitUsage || !strings.Contains(stderr, "--cab-id is required") {
+		t.Fatalf("missing cab id: exit = %d stderr = %q", exitCode, stderr)
+	}
+}

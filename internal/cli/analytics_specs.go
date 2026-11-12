@@ -147,6 +147,52 @@ func analyticsGroups() []analyticsGroup {
 			},
 		},
 		{
+			use:   "failures",
+			short: "Read crash and hang reports: counts, details and stack traces",
+			specs: []analyticsSpec{
+				{
+					use:   "list",
+					short: "List failure counts (crashes, hangs) per hour, day, week or month",
+					long: "List failure (crash, hang, memory, JavaScript error) counts, the numbers behind the\n" +
+						"Failures section of Partner Center's Health report.\n\n" +
+						"Group by failureHash to get the id that 'failures details' takes. Failures the Store\n" +
+						"could not bucket have an empty failureHash and no details.",
+					endpoint: "failurehits",
+					dimensions: []string{"eventType", "failureName", "failureHash", "symbol", "packageVersion", "packageName",
+						"osVersion", "osRelease", "market", "deviceType"},
+					defaultGroupBy: "date",
+					metrics:        []string{"eventCount", "deviceCount"},
+					// The live endpoint returns daily rows for week and month
+					// (checked 2026-11-12), so only day and hour are offered.
+					aggregations: []string{"day", "hour"},
+					// No orderby: this endpoint only orders by a groupby field,
+					// and date is not one. Rows are sorted by date anyway.
+					window: "the last 30 days (72 hours for --aggregation hour)",
+				},
+				{
+					use:   "details",
+					short: "List the individual reports for one failure, with device, OS and CAB ids",
+					long: "List the individual reports behind one failure: date, market, device model, OS build,\n" +
+						"package version, and the CAB id that 'failures stacktrace' takes.",
+					endpoint:    "failuredetails",
+					passthrough: true,
+					orderBy:     "date",
+					params:      []analyticsParam{{flag: "failure-hash", query: "failureHash", usage: "failureHash from 'failures list --group-by failureHash'", required: true}},
+					window:      "the last 30 days",
+				},
+				{
+					use:         "stacktrace",
+					short:       "Show the stack trace of one failure report",
+					long:        "Show the stack trace of one failure report, one row per frame, from its CAB id.",
+					endpoint:    "stacktrace",
+					passthrough: true,
+					noDateRange: true,
+					params:      []analyticsParam{{flag: "cab-id", query: "cabId", usage: "cabId from 'failures details'", required: true}},
+					window:      "failures from the last 30 days",
+				},
+			},
+		},
+		{
 			use:   "usage",
 			short: "Read app usage: active users, sessions and engagement",
 			specs: []analyticsSpec{
