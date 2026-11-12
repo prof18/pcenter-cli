@@ -7,6 +7,7 @@ Every `pcenter` command, its flags, and command-specific behavior. `pcenter <com
 - [`app info`](#app-info)
 - [`locales list`](#locales-list)
 - [`reviews list`](#reviews-list)
+- [`analytics acquisitions`](#analytics-acquisitions)
 - [`listing`](#listing) — `show`, `pull`, `push`
 - [`publish msix`](#publish-msix)
 - [`submission`](#submission) — `status`, `get`, `watch`, `commit`, `delete-draft`
@@ -114,6 +115,38 @@ pcenter reviews list [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--top <n>] [--skip <
 | `--orderby` | `date desc` | Passed through. |
 
 Table output is one row per review: date, market, rating, title, truncated text, package version. JSON output is the API's review objects untouched.
+
+---
+
+## `analytics acquisitions`
+
+```
+pcenter analytics acquisitions --from YYYY-MM-DD [--to YYYY-MM-DD]
+                               [--aggregation day|week|month] [--group-by <fields>]
+                               [--market <code>] [--filter <odata>]
+```
+
+Acquisitions (downloads) of the app, the same numbers as the Acquisitions report in Partner Center.
+
+| Flag | Default | Notes |
+| --- | --- | --- |
+| `--from` | — | Required. ISO date. |
+| `--to` | today | ISO date, inclusive. |
+| `--aggregation` | `day` | `day`, `week` or `month`. A week or month row is dated by the first day of its period, which can fall before `--from`. |
+| `--group-by` | `date` | Comma-separated breakdown, case-insensitive: `osVersion`, `market`, `deviceType`, `acquisitionType`, `storeClient`, `ageGroup`, `gender`, `orderName`. `date` is always included. |
+| `--market` | — | Two-letter market code; composed into the filter for you. |
+| `--filter` | — | Raw OData filter on the same fields, combined with `--market` when both are given. |
+
+Every page is fetched, so the rows always add up to the full total. Partner Center analytics lag by about a day, so the latest day can be missing or incomplete. A day with no acquisitions may have no row, so treat a missing date as zero.
+
+JSON output is an array of rows, sorted by date: `{date, acquisitionQuantity}` plus one field for each `--group-by` dimension. Dates are `YYYY-MM-DD` and the quantity is an integer.
+
+```json
+[{"date":"2026-11-10","acquisitionQuantity":12,"osVersion":"Windows 10"},
+ {"date":"2026-11-10","acquisitionQuantity":23,"osVersion":"Windows 11"}]
+```
+
+The analytics API uses the same credentials as every other command. No extra role or setting is needed.
 
 ---
 

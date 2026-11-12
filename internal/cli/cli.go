@@ -175,6 +175,7 @@ func (s *commandState) rootCommand() *cobra.Command {
 		s.appCommand(),
 		s.localesCommand(),
 		s.reviewsCommand(),
+		s.analyticsCommand(),
 		s.submissionCommand(),
 		s.rolloutCommand(),
 		s.publishCommand(),

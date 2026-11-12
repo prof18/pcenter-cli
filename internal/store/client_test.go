@@ -154,6 +154,10 @@ func TestClientReadsSubmissionRolloutAndReviews(t *testing.T) {
 			"published": {IsPackageRollout: true, PackageRolloutPercentage: 90, PackageRolloutStatus: "PackageRolloutInProgress", FallbackSubmissionID: "fallback"},
 		},
 		ReviewPages: []fakestore.ReviewPage{{Value: []json.RawMessage{json.RawMessage(`{"id":"review","rating":5}`)}, TotalCount: 1}},
+		AcquisitionPages: []fakestore.ReviewPage{
+			{Value: []json.RawMessage{json.RawMessage(`{"date":"2026-07-01","osVersion":"Windows 11","acquisitionQuantity":4.0}`)}, TotalCount: 2},
+			{Value: []json.RawMessage{json.RawMessage(`{"date":"2026-07-02","acquisitionQuantity":1}`)}, TotalCount: 2},
+		},
 	})
 	client := newTestClient(t, server, &fakeClock{now: time.Now()})
 
@@ -166,6 +170,14 @@ func TestClientReadsSubmissionRolloutAndReviews(t *testing.T) {
 	page, err := client.Reviews(context.Background(), store.ReviewQuery{ApplicationID: "APP", Top: 10000, Skip: 0})
 	if err != nil || len(page.Value) != 1 || page.TotalCount != 1 {
 		t.Fatalf("reviews = %+v, error = %v", page, err)
+	}
+	acquisitions, err := client.AppAcquisitions(context.Background(), store.AcquisitionQuery{ApplicationID: "APP", GroupBy: "date,osVersion", Top: 10000, Skip: 0})
+	if err != nil || len(acquisitions.Value) != 1 || acquisitions.Value[0].OSVersion != "Windows 11" || acquisitions.Value[0].AcquisitionQuantity != 4 || acquisitions.NextLink == "" {
+		t.Fatalf("acquisitions = %+v, error = %v", acquisitions, err)
+	}
+	next, err := client.AppAcquisitionsNext(context.Background(), acquisitions.NextLink)
+	if err != nil || len(next.Value) != 1 || next.Value[0].Date != "2026-07-02" || next.NextLink != "" {
+		t.Fatalf("next acquisitions = %+v, error = %v", next, err)
 	}
 }
 
