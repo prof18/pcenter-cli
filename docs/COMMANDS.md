@@ -174,6 +174,16 @@ Star ratings submitted in each period. `reviews list` has the reviews with text;
 - Metrics: `oneStar`, `twoStars`, `threeStars`, `fourStars`, `fiveStars`.
 - `--aggregation` is `day` or `week`. The API accepts `month` but returns daily rows, so pcenter does not offer it.
 
+### `analytics funnel`
+
+How many users reached each step from the Store page to using the app, over the whole range: `PageView`, `Acquisition`, `Install`, `Usage`. No `--group-by` or `--aggregation`; filter with `--market` or `--filter` on `market`, `deviceType`, `ageGroup`, `gender` or `campaignId`.
+
+```json
+[{"metricType":"PageView","userCount":180},{"metricType":"Acquisition","userCount":96}]
+```
+
+The API spells the acquisition step `Acqusition`; pcenter reports it as `Acquisition`, as Microsoft's docs do.
+
 ---
 
 ## `listing`
