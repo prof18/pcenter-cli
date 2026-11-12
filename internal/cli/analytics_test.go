@@ -302,3 +302,22 @@ func TestAnalyticsFailuresListDetailsAndStackTrace(t *testing.T) {
 		t.Fatalf("missing cab id: exit = %d stderr = %q", exitCode, stderr)
 	}
 }
+
+func TestAnalyticsInsightsComposesTheRequiredDataTypeFilter(t *testing.T) {
+	t.Parallel()
+	server := analyticsServer(t, "insights", []string{
+		`{"id":"8cdb","applicationId":"APP","insightDate":"2026-07-07T00:00:00","dataType":"acquisition","insightDetail":[{"DimensionName":"Market","DimensionValue":"GB","Direction":"Negative","PercentChange":3.3}]}`,
+	})
+	stdout := runAnalytics(t, server, "insights", "--from", "2026-07-01", "--data-type", "acquisition, Health")
+	if want := `[{"id":"8cdb","applicationId":"APP","insightDate":"2026-07-07T00:00:00","dataType":"acquisition","insightDetail":[{"DimensionName":"Market","DimensionValue":"GB","Direction":"Negative","PercentChange":3.3}]}]`; stdout != want {
+		t.Fatalf("stdout = %s, want %s", stdout, want)
+	}
+	query := analyticsRequests(t, server, "insights")[0]
+	if query["filter"] != "dataType eq 'acquisition' or dataType eq 'health'" || query["top"] != "" {
+		t.Fatalf("query = %+v", query)
+	}
+	_, _, exitCode := execute(t, fakeEnvironment(server), []string{"--output", "json", "analytics", "insights", "--from", "2026-07-01", "--data-type", "revenue"}, cli.BuildInfo{})
+	if exitCode != output.ExitUsage {
+		t.Fatalf("unknown data type exit = %d", exitCode)
+	}
+}

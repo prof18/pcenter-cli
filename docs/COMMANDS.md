@@ -217,6 +217,10 @@ Crashes, hangs, memory failures and JavaScript errors: the Failures section of P
 
 A failure the Store could not bucket has an empty `failureHash`, and no details or stack trace can be fetched for it. Every FeedFlow failure looks like this, so `details` and `stacktrace` follow Microsoft's reference and are not yet checked against live data.
 
+### `analytics insights`
+
+Partner Center's insights: week-over-week changes it flagged as significant, with the dimension that moved and by how much. `--data-type` picks `acquisition`, `health` and/or `usage` (default all three); there is no `--market`, `--filter` or `--group-by`. The API keeps the last 30 days. Rows are nested and passed through as the API returns them, so their fields keep the API's capitalisation (`DimensionName`, `PercentChange`, …).
+
 ---
 
 ## `listing`

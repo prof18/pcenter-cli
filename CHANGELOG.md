@@ -35,6 +35,9 @@ sales.
 package version, OS and device. `failures details` and `failures stacktrace` drill into one
 failure's reports and stack frames, when the Store has bucketed it.
 
+`pcenter analytics insights` lists the week-over-week changes Partner Center flagged in
+acquisitions, health and usage.
+
 Following a `@nextLink` from the analytics API now works for every form the API returns.
 Some endpoints send a link relative to the analytics folder, with the filter not encoded.
 `reviews list --all` resolved such a link against the wrong folder.
