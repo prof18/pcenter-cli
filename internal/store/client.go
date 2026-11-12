@@ -263,6 +263,49 @@ func (c *Client) ReviewsNext(ctx context.Context, nextLink string) (storetypes.R
 	return result, err
 }
 
+// AcquisitionQuery contains documented app acquisitions endpoint parameters.
+type AcquisitionQuery struct {
+	ApplicationID    string
+	StartDate        string
+	EndDate          string
+	AggregationLevel string
+	GroupBy          string
+	Filter           string
+	OrderBy          string
+	Top              int
+	Skip             int
+}
+
+// AppAcquisitions gets one page of aggregated acquisitions.
+func (c *Client) AppAcquisitions(ctx context.Context, query AcquisitionQuery) (storetypes.AcquisitionPage, error) {
+	values := url.Values{}
+	values.Set("applicationId", query.ApplicationID)
+	for key, value := range map[string]string{
+		"startDate": query.StartDate, "endDate": query.EndDate, "aggregationLevel": query.AggregationLevel,
+		"groupby": query.GroupBy, "filter": query.Filter, "orderby": query.OrderBy,
+	} {
+		if value != "" {
+			values.Set(key, value)
+		}
+	}
+	if query.Top > 0 {
+		values.Set("top", strconv.Itoa(query.Top))
+	}
+	if query.Skip >= 0 {
+		values.Set("skip", strconv.Itoa(query.Skip))
+	}
+	var result storetypes.AcquisitionPage
+	err := c.getJSON(ctx, "/analytics/appacquisitions?"+values.Encode(), &result)
+	return result, err
+}
+
+// AppAcquisitionsNext follows a relative or absolute @nextLink.
+func (c *Client) AppAcquisitionsNext(ctx context.Context, nextLink string) (storetypes.AcquisitionPage, error) {
+	var result storetypes.AcquisitionPage
+	err := c.getJSON(ctx, nextLink, &result)
+	return result, err
+}
+
 func (c *Client) getJSON(ctx context.Context, path string, destination any) error {
 	body, err := c.do(ctx, http.MethodGet, path, nil)
 	if err != nil {

@@ -46,7 +46,7 @@ type Rollout struct {
 	FallbackSubmissionID     string  `json:"fallbackSubmissionId,omitempty"`
 }
 
-// ReviewPage is one response page from the reviews endpoint.
+// ReviewPage is one response page from a paged analytics endpoint (reviews, app acquisitions).
 type ReviewPage struct {
 	Value      []json.RawMessage `json:"Value"`
 	TotalCount int               `json:"TotalCount"`
@@ -85,6 +85,7 @@ type Options struct {
 	Submissions         map[string]json.RawMessage
 	Rollouts            map[string]Rollout
 	ReviewPages         []ReviewPage
+	AcquisitionPages    []ReviewPage
 	Failures            []Failure
 	Responses           []Response
 	AccessToken         string
@@ -235,7 +236,9 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1.0/my/applications/"+s.options.AppID+"/submissions/"):
 		s.handleSubmissionGET(w, r)
 	case r.Method == http.MethodGet && r.URL.Path == "/v1.0/my/analytics/reviews":
-		s.handleReviews(w, r)
+		s.handlePaged(w, r, s.options.ReviewPages, "reviews")
+	case r.Method == http.MethodGet && r.URL.Path == "/v1.0/my/analytics/appacquisitions":
+		s.handlePaged(w, r, s.options.AcquisitionPages, "appacquisitions")
 	default:
 		if !s.handleCannedResponse(w, r) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "fake endpoint not found"})
@@ -664,8 +667,10 @@ func cloneStatusQueues(source map[string][]string) map[string][]string {
 	return result
 }
 
-func (s *Server) handleReviews(w http.ResponseWriter, r *http.Request) {
-	if len(s.options.ReviewPages) == 0 {
+// handlePaged serves an analytics endpoint whose pages are addressed by skip,
+// linking each page to the next the way the live API does with @nextLink.
+func (s *Server) handlePaged(w http.ResponseWriter, r *http.Request, pages []ReviewPage, endpoint string) {
+	if len(pages) == 0 {
 		writeJSON(w, http.StatusOK, ReviewPage{Value: []json.RawMessage{}, TotalCount: 0})
 		return
 	}
@@ -675,16 +680,16 @@ func (s *Server) handleReviews(w http.ResponseWriter, r *http.Request) {
 			page = parsed
 		}
 	}
-	if page < 0 || page >= len(s.options.ReviewPages) {
-		writeJSON(w, http.StatusOK, ReviewPage{Value: []json.RawMessage{}, TotalCount: s.options.ReviewPages[0].TotalCount})
+	if page < 0 || page >= len(pages) {
+		writeJSON(w, http.StatusOK, ReviewPage{Value: []json.RawMessage{}, TotalCount: pages[0].TotalCount})
 		return
 	}
 	payload := map[string]any{
-		"Value":      s.options.ReviewPages[page].Value,
-		"TotalCount": s.options.ReviewPages[page].TotalCount,
+		"Value":      pages[page].Value,
+		"TotalCount": pages[page].TotalCount,
 	}
-	if page+1 < len(s.options.ReviewPages) {
-		payload["@nextLink"] = fmt.Sprintf("/v1.0/my/analytics/reviews?applicationId=%s&skip=%d", s.options.AppID, page+1)
+	if page+1 < len(pages) {
+		payload["@nextLink"] = fmt.Sprintf("/v1.0/my/analytics/%s?applicationId=%s&skip=%d", endpoint, s.options.AppID, page+1)
 	}
 	writeJSON(w, http.StatusOK, payload)
 }

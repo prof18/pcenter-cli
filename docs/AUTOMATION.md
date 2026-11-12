@@ -86,6 +86,7 @@ Booleans and numbers stay typed. `submission get` and `reviews list` return the 
 | `app info` | The application resource: `{id, primaryName, packageFamilyName, packageIdentityName, publisherName, firstPublishedDate, hasAdvancedListingPermission, lastPublishedApplicationSubmission, pendingApplicationSubmission}` |
 | `locales list` | `["en-us", "it", …]` — a bare string array |
 | `reviews list` | The API's review objects, unmodified |
+| `analytics acquisitions` | `[{date, acquisitionQuantity, osVersion?, market?, deviceType?, acquisitionType?, storeClient?, ageGroup?, gender?, orderName?}]`. A dimension field is present only when `--group-by` asks for it |
 | `submission status` | `[{type: "published"\|"pending", id, status, statusDetails}]` |
 | `submission get` | The raw submission JSON (`fileUploadUrl` redacted unless `--include-upload-url`) |
 | `submission watch` | `{status, statusDetails, classification: "success"\|"failed"\|"neutral"\|"in-progress", warning?}` — `in-progress` plus a `warning` means the poll budget ran out, not that anything is wrong; exit 0 |

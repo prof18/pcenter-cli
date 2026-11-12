@@ -1,12 +1,12 @@
 # pcenter
 
-A command-line tool for the **Microsoft Store**. Publish an MSIX, manage listing content and screenshots from files in your repository, read reviews, and recover a stuck submission or rollout.
+A command-line tool for the **Microsoft Store**. Publish an MSIX, manage listing content and screenshots from files in your repository, read reviews and downloads, and recover a stuck submission or rollout.
 
 Use it at a terminal or in CI: it prints tables for people, JSON for scripts, and structured errors and exit codes for reliable automation.
 
 > **Status:** pcenter has created, uploaded, committed, and staged Microsoft Store releases from GitHub Actions. The command surface is stable.
 >
-> It covers publishing, listings, submissions, rollouts, and reviews. See [Scope](#scope) for what remains in Partner Center.
+> It covers publishing, listings, submissions, rollouts, reviews, and acquisitions. See [Scope](#scope) for what remains in Partner Center.
 
 ---
 
@@ -102,6 +102,7 @@ pcenter listing push --dir store/microsoft --yes
 | `app info` | Show app details |
 | `locales list` | List Store locales |
 | `reviews list` | List reviews with date, market, sorting, and paging options |
+| `analytics acquisitions` | Downloads per day, week or month, optionally by OS version, market or device |
 | `listing show` | Print the listing to stdout — no directory, no cleanup |
 | `listing pull \| push` | Pull or update listing files in your repository, with a diff before changes are sent |
 | `publish msix` | Create, upload, and commit an MSIX submission |
@@ -127,7 +128,7 @@ Not covered, deliberately:
 | Age ratings and content declarations | Set once in Partner Center. |
 | Add-ons (in-app products) and package flights | Separate API surfaces, not this one. |
 | Package formats other than MSIX | `publish msix` is the only publish path. |
-| Creating an app, and analytics beyond `reviews list` | Out of scope. |
+| Creating an app, and analytics beyond reviews and acquisitions | Out of scope. |
 
 If you need one of these often, please open an issue.
 
