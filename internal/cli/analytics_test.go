@@ -223,3 +223,14 @@ func TestAnalyticsFunnelRenamesFieldsAndFixesTheAcquisitionSpelling(t *testing.T
 		t.Fatalf("query = %+v", query)
 	}
 }
+
+func TestAnalyticsConversionsReportsClicksByChannel(t *testing.T) {
+	t.Parallel()
+	server := analyticsServer(t, "appchannelconversions", []string{
+		`{"date":"2026-07-02","applicationId":"APP","customCampaignId":"","channelType":"Store Traffic","market":null,"clickCount":13,"conversionCount":0}`,
+	})
+	stdout := runAnalytics(t, server, "conversions", "--from", "2026-07-01", "--group-by", "channelType,customCampaignId")
+	if want := `[{"date":"2026-07-02","channelType":"Store Traffic","customCampaignId":"","clickCount":13,"conversionCount":0}]`; stdout != want {
+		t.Fatalf("stdout = %s, want %s", stdout, want)
+	}
+}

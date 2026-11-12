@@ -70,6 +70,19 @@ func analyticsSpecs() []analyticsSpec {
 				return value
 			},
 		},
+		{
+			use:   "conversions",
+			short: "List Store page clicks and conversions by channel",
+			long: "List clicks on the app's Store listing and the conversions (new licences) they led to,\n" +
+				"by channel: Store traffic, custom promotion campaigns, or other.",
+			endpoint:       "appchannelconversions",
+			dimensions:     []string{"channelType", "customCampaignId", "referrerUriDomain", "market", "deviceType", "storeClient", "appType"},
+			defaultGroupBy: "date",
+			metrics:        []string{"clickCount", "conversionCount"},
+			// No aggregations: the live endpoint returns daily rows whatever
+			// aggregationLevel says (checked 2026-11-12).
+			orderBy: "date",
+		},
 	}
 }
 

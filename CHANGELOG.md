@@ -24,6 +24,9 @@ left without a review.
 `pcenter analytics funnel` shows how many users went from the Store page to acquiring,
 installing and using the app.
 
+`pcenter analytics conversions` reports Store listing clicks and the new licences they led
+to, by channel and promotion campaign.
+
 Following a `@nextLink` from the analytics API now works for every form the API returns.
 Some endpoints send a link relative to the analytics folder, with the filter not encoded.
 `reviews list --all` resolved such a link against the wrong folder.
