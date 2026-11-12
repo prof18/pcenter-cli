@@ -157,6 +157,15 @@ Successful installs. Each install of a package counts, so reinstalls and second 
 - Dimensions: `osVersion`, `market`, `deviceType`, `packageVersion`.
 - Metrics: `successfulInstallCount`.
 
+### `analytics usage daily` and `analytics usage monthly`
+
+Usage: active users and devices, new users, sessions and minutes of use, the numbers behind Partner Center's Usage report. The API only keeps the last 90 days. Usage has no `--aggregation`: pick `daily` or `monthly`.
+
+- Dimensions: `market`, `deviceType`, `packageVersion`, `subscriptionName`.
+- `daily` metrics: `dailyActiveUsers`, `dailyActiveDevices`, `dailyNewUsers`, `dailySessionCount`, `engagementDurationMinutes`, `monthlyActiveUsers`, `monthlyActiveDevices`, `monthlyNewUsers`, `dailyNewDevices`, `monthlyNewDevices`. The monthly fields on a daily row are rolling 30-day counts.
+- `monthly` metrics: `monthlyActiveUsers`, `monthlyActiveDevices`, `monthlyNewUsers`, `monthlySessionCount`, `engagementDurationMinutes`, `averageDailyActiveUsers`, `averageDailyActiveDevices`, `monthlyNewDevices`. One row per calendar month, dated by its first day.
+- The `…NewDevices` fields are only filled for web apps (PWAs); for other apps they are `0`.
+
 ---
 
 ## `listing`
