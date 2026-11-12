@@ -133,7 +133,7 @@ Shared flags:
 | `--market` | — | Two-letter market code; composed into the filter for you. |
 | `--filter` | — | Raw OData filter, combined with `--market` when both are given. |
 
-Every page is fetched, so rows always add up to the full total. Partner Center analytics lag by about a day, so the latest day can be missing or incomplete. A period with nothing to report may have no row, so treat a missing date as zero.
+Every page is fetched, so rows always add up to the full total. Rows are sorted by date, and `--to` is inclusive: some endpoints ignore the requested order or return a row for the day after the range, and pcenter corrects both. Partner Center analytics lag by about a day, so the latest day can be missing or incomplete. A period with nothing to report may have no row, so treat a missing date as zero.
 
 JSON output is an array of rows. Each row has `date` (as `YYYY-MM-DD`), then one field per `--group-by` dimension in the order given, then the command's metrics. Fields the API returns as null are left out. Whole numbers are integers, so `2.0` from the API is reported as `2`.
 
@@ -149,6 +149,13 @@ Acquisitions (downloads), the same numbers as the Acquisitions report in Partner
 ```json
 [{"date":"2026-11-10","osVersion":"Windows 10","acquisitionQuantity":12,"purchasePriceUSDAmount":0,"purchaseTaxUSDAmount":0}]
 ```
+
+### `analytics installs`
+
+Successful installs. Each install of a package counts, so reinstalls and second devices make this higher than acquisitions.
+
+- Dimensions: `osVersion`, `market`, `deviceType`, `packageVersion`.
+- Metrics: `successfulInstallCount`.
 
 ---
 

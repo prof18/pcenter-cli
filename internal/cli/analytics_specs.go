@@ -25,6 +25,18 @@ func analyticsSpecs() []analyticsSpec {
 			aggregations:   []string{"day", "week", "month"},
 			orderBy:        "date",
 		},
+		{
+			use:   "installs",
+			short: "List successful app installs per day, week or month",
+			long: "List successful installs. An install is counted each time a package is installed,\n" +
+				"so reinstalls and installs on a second device make this higher than acquisitions.",
+			endpoint:       "installs",
+			dimensions:     []string{"osVersion", "market", "deviceType", "packageVersion"},
+			defaultGroupBy: "date",
+			metrics:        []string{"successfulInstallCount"},
+			aggregations:   []string{"day", "week", "month"},
+			orderBy:        "date",
+		},
 	}
 }
 

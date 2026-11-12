@@ -132,3 +132,38 @@ func TestAnalyticsAcquisitionsRejectsBadInputBeforeAnyRequest(t *testing.T) {
 		}
 	}
 }
+
+func TestAnalyticsInstallsReportsInstallCounts(t *testing.T) {
+	t.Parallel()
+	server := analyticsServer(t, "installs", []string{
+		`{"date":"2026-07-04","applicationId":"APP","applicationName":"FeedFlow","packageVersion":"1.20.0.0","deviceType":null,"market":null,"osVersion":null,"ageGroup":null,"successfulInstallCount":36}`,
+	})
+	stdout := runAnalytics(t, server, "installs", "--from", "2026-07-04", "--group-by", "packageVersion", "--aggregation", "week")
+	if want := `[{"date":"2026-07-04","packageVersion":"1.20.0.0","successfulInstallCount":36}]`; stdout != want {
+		t.Fatalf("stdout = %s, want %s", stdout, want)
+	}
+	query := analyticsRequests(t, server, "installs")[0]
+	if query["groupby"] != "date,packageVersion" || query["aggregationLevel"] != "week" {
+		t.Fatalf("query = %+v", query)
+	}
+}
+
+// The live installs and usage endpoints return newest first whatever orderby
+// says, and include a row for the day after endDate. pcenter sorts and keeps
+// --to inclusive itself.
+func TestAnalyticsSortsByDateAndDropsRowsAfterTo(t *testing.T) {
+	t.Parallel()
+	server := analyticsServer(t, "installs", []string{
+		`{"date":"2026-07-03","successfulInstallCount":3}`,
+		`{"date":"2026-07-02","packageVersion":"2","successfulInstallCount":2}`,
+		`{"date":"2026-07-02","packageVersion":"1","successfulInstallCount":1}`,
+		`{"date":"2026-07-01","successfulInstallCount":9}`,
+	})
+	stdout := runAnalytics(t, server, "installs", "--from", "2026-07-01", "--to", "2026-07-02", "--group-by", "packageVersion")
+	want := `[{"date":"2026-07-01","successfulInstallCount":9},` +
+		`{"date":"2026-07-02","packageVersion":"2","successfulInstallCount":2},` +
+		`{"date":"2026-07-02","packageVersion":"1","successfulInstallCount":1}]`
+	if stdout != want {
+		t.Fatalf("stdout = %s\nwant   = %s", stdout, want)
+	}
+}

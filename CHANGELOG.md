@@ -12,9 +12,12 @@ the counts down by OS version, market, device type and the other dimensions the 
 records. JSON output is one row per period and breakdown, so a script can sum
 `acquisitionQuantity` directly. It needs no new credentials.
 
+`pcenter analytics installs` reports successful installs. Every install of a package counts,
+so reinstalls and second devices make it higher than acquisitions.
+
 Following a `@nextLink` from the analytics API now works for every form the API returns.
-Some endpoints send a link relative to the analytics folder, with the filter not encoded;
-`reviews list --all` would have requested the wrong URL for one of those.
+Some endpoints send a link relative to the analytics folder, with the filter not encoded.
+`reviews list --all` resolved such a link against the wrong folder.
 
 ## 0.0.3
 
