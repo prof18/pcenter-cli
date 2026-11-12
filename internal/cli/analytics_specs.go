@@ -224,9 +224,10 @@ func analyticsGroups() []analyticsGroup {
 					window:  "the last 90 days",
 				},
 				{
-					use:            "monthly",
-					short:          "List monthly usage: active users and devices, new users, sessions, minutes",
-					long:           "List monthly usage, one row per calendar month, dated by its first day.",
+					use:   "monthly",
+					short: "List monthly usage: active users and devices, new users, sessions, minutes",
+					long: "List monthly usage, one row per calendar month, dated by its first day.\n" +
+						"A month is only included when its first day is inside the range, so start --from on the 1st.",
 					endpoint:       "usagemonthly",
 					dimensions:     usageDimensions,
 					defaultGroupBy: "date",
