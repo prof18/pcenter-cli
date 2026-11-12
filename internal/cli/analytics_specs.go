@@ -71,6 +71,19 @@ func analyticsSpecs() []analyticsSpec {
 			},
 		},
 		{
+			use:   "insights",
+			short: "List notable changes Partner Center detected in acquisitions, health or usage",
+			long: "List Partner Center's insights: week-over-week changes it flagged as significant in\n" +
+				"acquisitions, health (failures) or usage, with the dimension that moved and by how much.\n" +
+				"Rows are nested and passed through as the API returns them.",
+			endpoint:    "insights",
+			dateless:    true,
+			passthrough: true,
+			noPaging:    true,
+			dataTypes:   []string{"acquisition", "health", "usage"},
+			window:      "the last 30 days",
+		},
+		{
 			use:   "conversions",
 			short: "List Store page clicks and conversions by channel",
 			long: "List clicks on the app's Store listing and the conversions (new licences) they led to,\n" +
