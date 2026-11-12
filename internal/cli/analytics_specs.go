@@ -39,7 +39,7 @@ func analyticsSpecs() []analyticsSpec {
 		},
 		{
 			use:            "ratings",
-			short:          "List star ratings per day, week or month",
+			short:          "List star ratings per day or week",
 			long:           "List the number of one- to five-star ratings submitted in each period.",
 			endpoint:       "ratings",
 			dimensions:     []string{"market", "osVersion", "deviceType", "isRevised"},
