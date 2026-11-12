@@ -27,6 +27,10 @@ installing and using the app.
 `pcenter analytics conversions` reports Store listing clicks and the new licences they led
 to, by channel and promotion campaign.
 
+`pcenter analytics addons acquisitions`, `addons subscriptions` and `addons conversions` do the
+same for add-ons. Subscriptions include renewals, active counts, churn by reason and gross
+sales.
+
 Following a `@nextLink` from the analytics API now works for every form the API returns.
 Some endpoints send a link relative to the analytics folder, with the filter not encoded.
 `reviews list --all` resolved such a link against the wrong folder.

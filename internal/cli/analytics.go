@@ -42,13 +42,13 @@ type analyticsSpec struct {
 	passthrough bool
 	// noDateRange is for endpoints keyed by an id alone (stack trace).
 	noDateRange bool
-	// noPaging is for endpoints that take no top/skip (funnel, insights).
+	// noPaging is for endpoints that take no top/skip (funnel, insights,
+	// subscriptions). Any @nextLink they return is still followed.
 	noPaging bool
 	// dataTypes, when set, replaces --market/--filter with a --data-type flag
 	// composed into the filter the endpoint requires (insights).
 	dataTypes []string
 	orderBy   string
-	top       int
 	params    []analyticsParam
 	// rename maps an API field to the name pcenter reports, for endpoints
 	// that break the API's own camelCase convention.
@@ -142,11 +142,7 @@ func (s *commandState) analyticsSpecCommand(spec analyticsSpec) *cobra.Command {
 				query.Set("orderby", spec.orderBy)
 			}
 			if !spec.noDateRange && !spec.noPaging {
-				top := spec.top
-				if top == 0 {
-					top = 10000
-				}
-				query.Set("top", strconv.Itoa(top))
+				query.Set("top", "10000")
 				query.Set("skip", "0")
 			}
 			if err := s.prepareClient(); err != nil {

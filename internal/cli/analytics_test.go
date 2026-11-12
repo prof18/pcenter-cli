@@ -234,3 +234,28 @@ func TestAnalyticsConversionsReportsClicksByChannel(t *testing.T) {
 		t.Fatalf("stdout = %s, want %s", stdout, want)
 	}
 }
+
+func TestAnalyticsAddOnsKeepTheAddOnIDAndPassItsFilter(t *testing.T) {
+	t.Parallel()
+	server := analyticsServer(t, "inappacquisitions", []string{
+		`{"applicationId":"APP","inAppProductName":"Pro","addonProductId":"9NADDON","date":"2026-07-02","acquisitionQuantity":1,"purchasePriceUSDAmount":4.147206,"purchaseTaxUSDAmount":0.686004}`,
+	})
+	stdout := runAnalytics(t, server, "addons", "acquisitions", "--from", "2026-07-01", "--addon-id", "9NADDON")
+	if want := `[{"date":"2026-07-02","addonProductId":"9NADDON","acquisitionQuantity":1,"purchasePriceUSDAmount":4.147206,"purchaseTaxUSDAmount":0.686004}]`; stdout != want {
+		t.Fatalf("stdout = %s, want %s", stdout, want)
+	}
+	if query := analyticsRequests(t, server, "inappacquisitions")[0]; query["inAppProductId"] != "9NADDON" || query["applicationId"] != "APP" {
+		t.Fatalf("query = %+v", query)
+	}
+
+	server = analyticsServer(t, "subscriptions", []string{
+		`{"date":"2026-07-01","applicationId":"APP","subscriptionProductName":"pro.monthly","newCount":2,"renewCount":13,"totalActiveCount":152,"grossSalesBeforeTax":0.0,"currencyCode":"EUR"}`,
+	})
+	stdout = runAnalytics(t, server, "addons", "subscriptions", "--from", "2026-07-01", "--group-by", "subscriptionProductName")
+	if want := `[{"date":"2026-07-01","subscriptionProductName":"pro.monthly","newCount":2,"renewCount":13,"totalActiveCount":152,"grossSalesBeforeTax":0,"currencyCode":"EUR"}]`; stdout != want {
+		t.Fatalf("subscriptions stdout = %s, want %s", stdout, want)
+	}
+	if query := analyticsRequests(t, server, "subscriptions")[0]; query["top"] != "" || query["skip"] != "" {
+		t.Fatalf("subscriptions must send no top or skip: %+v", query)
+	}
+}

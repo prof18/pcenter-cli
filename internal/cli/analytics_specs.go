@@ -88,7 +88,64 @@ func analyticsSpecs() []analyticsSpec {
 
 func analyticsGroups() []analyticsGroup {
 	usageDimensions := []string{"market", "deviceType", "packageVersion", "subscriptionName"}
+	addOnParam := analyticsParam{flag: "addon-id", query: "inAppProductId", usage: "Store ID of one add-on (default: all of the app's add-ons)"}
 	return []analyticsGroup{
+		{
+			use:   "addons",
+			short: "Read add-on (in-app product) acquisitions, subscriptions and conversions",
+			// The add-on endpoints were checked live only for an app without
+			// add-ons (empty result, 2026-11-12); field lists follow the docs.
+			specs: []analyticsSpec{
+				{
+					use:            "acquisitions",
+					short:          "List add-on acquisitions per day, week or month",
+					endpoint:       "inappacquisitions",
+					dimensions:     []string{"inAppProductName", "acquisitionType", "market", "osVersion", "deviceType", "storeClient", "ageGroup", "gender", "orderName"},
+					defaultGroupBy: "date",
+					// The docs name the add-on id inAppProductId; their own
+					// sample response calls it addonProductId. Keep whichever
+					// arrives.
+					identity:     []string{"inAppProductId", "addonProductId"},
+					metrics:      []string{"acquisitionQuantity", "purchasePriceUSDAmount", "purchaseTaxUSDAmount"},
+					aggregations: []string{"day", "week", "month"},
+					orderBy:      "date",
+					params:       []analyticsParam{addOnParam},
+				},
+				{
+					use:   "subscriptions",
+					short: "List subscription add-on activity: new, renewed, active and churned",
+					long: "List subscription add-on acquisitions per period: new subscriptions, renewals,\n" +
+						"active counts by billing state, churn by reason, and gross sales before tax.",
+					endpoint:       "subscriptions",
+					dimensions:     []string{"subscriptionProductName", "skuId", "market", "deviceType"},
+					defaultGroupBy: "date",
+					identity:       []string{"subscriptionProductId"},
+					metrics: []string{"newCount", "renewCount", "totalActiveCount", "totalChurnCount",
+						"goodStandingActiveCount", "pendingGraceActiveCount", "graceActiveCount", "lockedActiveCount",
+						"billingChurnCount", "nonRenewalChurnCount", "refundChurnCount", "chargebackChurnCount",
+						"earlyChurnCount", "otherChurnCount", "grossSalesBeforeTax", "currencyCode"},
+					aggregations: []string{"day", "week", "month"},
+					orderBy:      "date",
+					// The live API rejects top and skip with HTTP 400 although
+					// the docs list them (checked 2026-11-12).
+					noPaging: true,
+					params:   []analyticsParam{{flag: "subscription-id", query: "subscriptionProductId", usage: "Store ID of one subscription add-on (default: all)"}},
+				},
+				{
+					use:            "conversions",
+					short:          "List add-on listing clicks and conversions by channel",
+					endpoint:       "inappchannelconversions",
+					dimensions:     []string{"inAppProductName", "channelType", "customCampaignId", "referrerUriDomain", "market", "deviceType", "storeClient", "appType"},
+					defaultGroupBy: "date",
+					identity:       []string{"inAppProductId"},
+					metrics:        []string{"clickCount", "conversionCount"},
+					// No aggregations, like app conversions: that endpoint
+					// ignores aggregationLevel.
+					orderBy: "date",
+					params:  []analyticsParam{addOnParam},
+				},
+			},
+		},
 		{
 			use:   "usage",
 			short: "Read app usage: active users, sessions and engagement",
