@@ -190,3 +190,15 @@ func TestAnalyticsUsageDropsUngroupedAllDimensions(t *testing.T) {
 		t.Fatalf("monthly stdout = %s, want %s", stdout, want)
 	}
 }
+
+func TestAnalyticsRatingsReportsStarCounts(t *testing.T) {
+	t.Parallel()
+	server := analyticsServer(t, "ratings", []string{
+		`{"date":"2026-07-05","packageVersion":null,"applicationId":"APP","market":"IT","osVersion":null,"isRevised":"false","oneStar":0,"twoStars":0,"threeStars":0,"fourStars":1,"fiveStars":2}`,
+	})
+	stdout := runAnalytics(t, server, "ratings", "--from", "2026-07-01", "--group-by", "market,isRevised")
+	want := `[{"date":"2026-07-05","market":"IT","isRevised":"false","oneStar":0,"twoStars":0,"threeStars":0,"fourStars":1,"fiveStars":2}]`
+	if stdout != want {
+		t.Fatalf("stdout = %s\nwant   = %s", stdout, want)
+	}
+}
