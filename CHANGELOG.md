@@ -18,6 +18,9 @@ so reinstalls and second devices make it higher than acquisitions.
 `pcenter analytics usage daily` and `usage monthly` report active users and devices, new
 users, sessions and minutes of use, from the last 90 days.
 
+`pcenter analytics ratings` counts one- to five-star ratings per period, including ratings
+left without a review.
+
 Following a `@nextLink` from the analytics API now works for every form the API returns.
 Some endpoints send a link relative to the analytics folder, with the filter not encoded.
 `reviews list --all` resolved such a link against the wrong folder.

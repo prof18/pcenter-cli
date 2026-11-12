@@ -37,6 +37,19 @@ func analyticsSpecs() []analyticsSpec {
 			aggregations:   []string{"day", "week", "month"},
 			orderBy:        "date",
 		},
+		{
+			use:            "ratings",
+			short:          "List star ratings per day, week or month",
+			long:           "List the number of one- to five-star ratings submitted in each period.",
+			endpoint:       "ratings",
+			dimensions:     []string{"market", "osVersion", "deviceType", "isRevised"},
+			defaultGroupBy: "date",
+			metrics:        []string{"oneStar", "twoStars", "threeStars", "fourStars", "fiveStars"},
+			// The live endpoint answers aggregationLevel=month with daily
+			// rows (checked 2026-11-12), so month is not offered.
+			aggregations: []string{"day", "week"},
+			orderBy:      "date",
+		},
 	}
 }
 

@@ -166,6 +166,14 @@ Usage: active users and devices, new users, sessions and minutes of use, the num
 - `monthly` metrics: `monthlyActiveUsers`, `monthlyActiveDevices`, `monthlyNewUsers`, `monthlySessionCount`, `engagementDurationMinutes`, `averageDailyActiveUsers`, `averageDailyActiveDevices`, `monthlyNewDevices`. One row per calendar month, dated by its first day.
 - The `…NewDevices` fields are only filled for web apps (PWAs); for other apps they are `0`.
 
+### `analytics ratings`
+
+Star ratings submitted in each period. `reviews list` has the reviews with text; this has every rating, including those without a review.
+
+- Dimensions: `market`, `osVersion`, `deviceType`, `isRevised`. The API reports `isRevised` as the string `"true"` or `"false"`.
+- Metrics: `oneStar`, `twoStars`, `threeStars`, `fourStars`, `fiveStars`.
+- `--aggregation` is `day` or `week`. The API accepts `month` but returns daily rows, so pcenter does not offer it.
+
 ---
 
 ## `listing`
