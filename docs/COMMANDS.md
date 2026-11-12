@@ -163,7 +163,7 @@ Usage: active users and devices, new users, sessions and minutes of use, the num
 
 - Dimensions: `market`, `deviceType`, `packageVersion`, `subscriptionName`.
 - `daily` metrics: `dailyActiveUsers`, `dailyActiveDevices`, `dailyNewUsers`, `dailySessionCount`, `engagementDurationMinutes`, `monthlyActiveUsers`, `monthlyActiveDevices`, `monthlyNewUsers`, `dailyNewDevices`, `monthlyNewDevices`. The monthly fields on a daily row are rolling 30-day counts.
-- `monthly` metrics: `monthlyActiveUsers`, `monthlyActiveDevices`, `monthlyNewUsers`, `monthlySessionCount`, `engagementDurationMinutes`, `averageDailyActiveUsers`, `averageDailyActiveDevices`, `monthlyNewDevices`. One row per calendar month, dated by its first day.
+- `monthly` metrics: `monthlyActiveUsers`, `monthlyActiveDevices`, `monthlyNewUsers`, `monthlySessionCount`, `engagementDurationMinutes`, `averageDailyActiveUsers`, `averageDailyActiveDevices`, `monthlyNewDevices`. One row per calendar month, dated by its first day. A month is only included when its first day is inside the range, so start `--from` on the 1st.
 - The `…NewDevices` fields are only filled for web apps (PWAs); for other apps they are `0`.
 
 ### `analytics ratings`
