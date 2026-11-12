@@ -4,7 +4,7 @@ What changed, for the people using it. Each release's section is what the releas
 publishes as its notes — `release.yml` reads it from here and refuses to publish a tag
 that has no section, so this file cannot fall behind.
 
-## Unreleased
+## 0.0.4
 
 `pcenter analytics acquisitions` reports how many times the app was acquired, per day, week
 or month, the same numbers as the Acquisitions report in Partner Center. `--group-by` breaks
