@@ -193,6 +193,18 @@ Clicks on the app's Store listing and the conversions (new licences) they led to
 - Always daily: the API ignores an aggregation level, so there is no `--aggregation`.
 - `conversionCount` is Microsoft's own count of new licences attributed to a listing click. It can be `0` while `acquisitions` and `funnel` show downloads.
 
+### `analytics addons acquisitions`, `addons subscriptions`, `addons conversions`
+
+Add-on (in-app product) analytics. Each row carries the add-on's Store ID, so rows from different add-ons stay apart. These were checked live only against an app without add-ons, which returns `[]`; the fields follow Microsoft's reference.
+
+| Command | Extra flag | Dimensions | Metrics |
+| --- | --- | --- | --- |
+| `addons acquisitions` | `--addon-id` | `inAppProductName`, `acquisitionType`, `market`, `osVersion`, `deviceType`, `storeClient`, `ageGroup`, `gender`, `orderName` | `acquisitionQuantity`, `purchasePriceUSDAmount`, `purchaseTaxUSDAmount` |
+| `addons subscriptions` | `--subscription-id` | `subscriptionProductName`, `skuId`, `market`, `deviceType` | `newCount`, `renewCount`, `totalActiveCount`, `totalChurnCount`, the active counts by billing state, churn by reason, `grossSalesBeforeTax`, `currencyCode` |
+| `addons conversions` | `--addon-id` | `inAppProductName`, `channelType`, `customCampaignId`, `referrerUriDomain`, `market`, `deviceType`, `storeClient`, `appType` | `clickCount`, `conversionCount` |
+
+Without the id flag each command covers all of the app's add-ons. `addons conversions` is always daily, like `conversions`.
+
 ---
 
 ## `listing`
