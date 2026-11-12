@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -93,13 +94,15 @@ func (s *commandState) analyticsSpecCommand(spec analyticsSpec) *cobra.Command {
 		Args:  noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			query := url.Values{}
+			var lastDay string
 			if !spec.noDateRange {
-				startDate, endDate, err := analyticsDateRange(from, to, s.dependencies.Now())
+				startDate, endDate, last, err := analyticsDateRange(from, to, s.dependencies.Now())
 				if err != nil {
 					return err
 				}
 				query.Set("startDate", startDate)
 				query.Set("endDate", endDate)
+				lastDay = last
 			}
 			for i, param := range spec.params {
 				value := strings.TrimSpace(ids[i])
@@ -166,6 +169,9 @@ func (s *commandState) analyticsSpecCommand(spec analyticsSpec) *cobra.Command {
 			if err != nil {
 				return failureError{err}
 			}
+			if !spec.noDateRange && !spec.dateless {
+				rows = sortAndTrimByDate(rows, lastDay)
+			}
 			return s.renderAnalytics(rows)
 		},
 	}
@@ -215,25 +221,51 @@ func dataTypeFilter(allowed []string, raw string) (string, error) {
 	return strings.Join(statements, " or "), nil
 }
 
-func analyticsDateRange(from, to string, now time.Time) (string, string, error) {
+// analyticsDateRange returns the API's start and end dates and the last day
+// to report, as YYYY-MM-DD.
+func analyticsDateRange(from, to string, now time.Time) (string, string, string, error) {
 	if strings.TrimSpace(from) == "" {
-		return "", "", usageError{errors.New("--from is required")}
+		return "", "", "", usageError{errors.New("--from is required")}
 	}
 	start, err := time.Parse("2006-01-02", from)
 	if err != nil {
-		return "", "", usageError{errors.New("--from: expected YYYY-MM-DD")}
+		return "", "", "", usageError{errors.New("--from: expected YYYY-MM-DD")}
 	}
 	end := now.UTC()
 	if to != "" {
 		end, err = time.Parse("2006-01-02", to)
 		if err != nil {
-			return "", "", usageError{errors.New("--to: expected YYYY-MM-DD")}
+			return "", "", "", usageError{errors.New("--to: expected YYYY-MM-DD")}
 		}
 	}
 	if end.Format("2006-01-02") < start.Format("2006-01-02") {
-		return "", "", usageError{errors.New("--to must not be before --from")}
+		return "", "", "", usageError{errors.New("--to must not be before --from")}
 	}
-	return start.Format("1/2/2006"), end.Format("1/2/2006"), nil
+	return start.Format("1/2/2006"), end.Format("1/2/2006"), end.Format("2006-01-02"), nil
+}
+
+// sortAndTrimByDate orders rows by date, keeping the API's order within a
+// date, and drops rows dated after lastDay. Both are needed because the
+// endpoints disagree: installs and usage ignore orderby and return newest
+// first, and they include a row for the day after endDate. Rows before --from
+// are kept, since a week or month row is dated by the start of its period.
+func sortAndTrimByDate(rows []analyticsRow, lastDay string) []analyticsRow {
+	kept := rows[:0]
+	for _, row := range rows {
+		if day := rowDay(row); day == "" || day <= lastDay {
+			kept = append(kept, row)
+		}
+	}
+	sort.SliceStable(kept, func(i, j int) bool { return rowDay(kept[i]) < rowDay(kept[j]) })
+	return kept
+}
+
+func rowDay(row analyticsRow) string {
+	var date string
+	if err := json.Unmarshal(row.values["date"], &date); err != nil || len(date) < 10 {
+		return ""
+	}
+	return date[:10]
 }
 
 // analyticsGroupBy validates the breakdown, case-insensitively, and always
