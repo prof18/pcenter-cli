@@ -202,3 +202,24 @@ func TestAnalyticsRatingsReportsStarCounts(t *testing.T) {
 		t.Fatalf("stdout = %s\nwant   = %s", stdout, want)
 	}
 }
+
+func TestAnalyticsFunnelRenamesFieldsAndFixesTheAcquisitionSpelling(t *testing.T) {
+	t.Parallel()
+	server := analyticsServer(t, "funnel", []string{
+		`{"MetricType":"PageView","UserCount":180}`,
+		`{"MetricType":"Acqusition","UserCount":96}`,
+	})
+	stdout := runAnalytics(t, server, "funnel", "--from", "2026-07-01", "--market", "US")
+	if want := `[{"metricType":"PageView","userCount":180},{"metricType":"Acquisition","userCount":96}]`; stdout != want {
+		t.Fatalf("stdout = %s, want %s", stdout, want)
+	}
+	query := analyticsRequests(t, server, "funnel")[0]
+	for _, absent := range []string{"groupby", "aggregationLevel", "top", "skip", "orderby"} {
+		if _, ok := query[absent]; ok {
+			t.Fatalf("funnel query has %s: %+v", absent, query)
+		}
+	}
+	if query["filter"] != "market eq 'US'" {
+		t.Fatalf("query = %+v", query)
+	}
+}

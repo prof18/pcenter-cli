@@ -50,6 +50,26 @@ func analyticsSpecs() []analyticsSpec {
 			aggregations: []string{"day", "week"},
 			orderBy:      "date",
 		},
+		{
+			use:   "funnel",
+			short: "Show the acquisition funnel: page views, acquisitions, installs, usage",
+			long: "Show how many users reached each step from the Store page to using the app,\n" +
+				"for the whole date range. Filter by market, deviceType, ageGroup, gender or campaignId.",
+			endpoint: "funnel",
+			dateless: true,
+			noPaging: true,
+			metrics:  []string{"MetricType", "UserCount"},
+			// The funnel is the one endpoint with capitalised field names.
+			rename: map[string]string{"MetricType": "metricType", "UserCount": "userCount"},
+			// The live API spells the acquisition step "Acqusition"
+			// (checked 2026-11-12); the docs spell it "Acquisition".
+			fix: func(field, value string) string {
+				if field == "metricType" && value == "Acqusition" {
+					return "Acquisition"
+				}
+				return value
+			},
+		},
 	}
 }
 
