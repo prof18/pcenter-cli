@@ -41,5 +41,39 @@ func analyticsSpecs() []analyticsSpec {
 }
 
 func analyticsGroups() []analyticsGroup {
-	return nil
+	usageDimensions := []string{"market", "deviceType", "packageVersion", "subscriptionName"}
+	return []analyticsGroup{
+		{
+			use:   "usage",
+			short: "Read app usage: active users, sessions and engagement",
+			specs: []analyticsSpec{
+				{
+					use:   "daily",
+					short: "List daily usage: active users and devices, new users, sessions, minutes",
+					long: "List daily usage, the numbers behind Partner Center's Usage report.\n\n" +
+						"monthlyActiveUsers on a daily row is the rolling count for the 30 days to that date.",
+					endpoint:       "usagedaily",
+					dimensions:     usageDimensions,
+					defaultGroupBy: "date",
+					metrics: []string{"dailyActiveUsers", "dailyActiveDevices", "dailyNewUsers", "dailySessionCount",
+						"engagementDurationMinutes", "monthlyActiveUsers", "monthlyActiveDevices", "monthlyNewUsers",
+						"dailyNewDevices", "monthlyNewDevices"},
+					orderBy: "date",
+					window:  "the last 90 days",
+				},
+				{
+					use:            "monthly",
+					short:          "List monthly usage: active users and devices, new users, sessions, minutes",
+					long:           "List monthly usage, one row per calendar month, dated by its first day.",
+					endpoint:       "usagemonthly",
+					dimensions:     usageDimensions,
+					defaultGroupBy: "date",
+					metrics: []string{"monthlyActiveUsers", "monthlyActiveDevices", "monthlyNewUsers", "monthlySessionCount",
+						"engagementDurationMinutes", "averageDailyActiveUsers", "averageDailyActiveDevices", "monthlyNewDevices"},
+					orderBy: "date",
+					window:  "the last 90 days",
+				},
+			},
+		},
+	}
 }

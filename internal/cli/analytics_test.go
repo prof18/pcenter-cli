@@ -167,3 +167,26 @@ func TestAnalyticsSortsByDateAndDropsRowsAfterTo(t *testing.T) {
 		t.Fatalf("stdout = %s\nwant   = %s", stdout, want)
 	}
 }
+
+func TestAnalyticsUsageDropsUngroupedAllDimensions(t *testing.T) {
+	t.Parallel()
+	server := analyticsServer(t, "usagedaily", []string{
+		`{"date":"2026-07-04","applicationId":"APP","subscriptionName":null,"deviceType":"All","packageVersion":"All","market":"All","dailySessionCount":108,"engagementDurationMinutes":475.4,"dailyActiveUsers":47,"dailyActiveDevices":47,"dailyNewUsers":8,"monthlyActiveUsers":396,"monthlyActiveDevices":391,"monthlyNewUsers":250,"dailyNewDevices":0,"monthlyNewDevices":0}`,
+	})
+	stdout := runAnalytics(t, server, "usage", "daily", "--from", "2026-07-04")
+	want := `[{"date":"2026-07-04","dailyActiveUsers":47,"dailyActiveDevices":47,"dailyNewUsers":8,"dailySessionCount":108,` +
+		`"engagementDurationMinutes":475.4,"monthlyActiveUsers":396,"monthlyActiveDevices":391,"monthlyNewUsers":250,"dailyNewDevices":0,"monthlyNewDevices":0}]`
+	if stdout != want {
+		t.Fatalf("stdout = %s\nwant   = %s", stdout, want)
+	}
+	if query := analyticsRequests(t, server, "usagedaily")[0]; query["aggregationLevel"] != "" || query["groupby"] != "date" {
+		t.Fatalf("usage takes no aggregationLevel: %+v", query)
+	}
+	server = analyticsServer(t, "usagemonthly", []string{
+		`{"date":"2026-06-01","market":"All","monthlyActiveUsers":354,"averageDailyActiveUsers":35.06,"engagementDurationMinutes":6813.200000000002}`,
+	})
+	stdout = runAnalytics(t, server, "usage", "monthly", "--from", "2026-06-01")
+	if want := `[{"date":"2026-06-01","monthlyActiveUsers":354,"engagementDurationMinutes":6813.200000000002,"averageDailyActiveUsers":35.06}]`; stdout != want {
+		t.Fatalf("monthly stdout = %s, want %s", stdout, want)
+	}
+}
