@@ -8,6 +8,8 @@ that has no section, so this file cannot fall behind.
 
 `pcenter auth login` now stores credentials in the system keychain: macOS Keychain, Windows Credential Manager, or Secret Service on Linux. The credentials file still works: `--storage file`, or naming a file with `--env-file` or `PCENTER_ENV_FILE`, writes it instead, and every command reads both. Resolution order is flags, `MS_STORE_*` variables, a named file, the keychain, then the default file, so CI that sets the variables is unchanged. Set `PCENTER_BYPASS_KEYCHAIN=1` on machines without a keychain. `auth logout` clears both, and `auth status` and `auth doctor` report the keychain.
 
+`auth login` now prompts only when stdin is a terminal. It used to check stdout, so input piped in while the output went to a terminal could leave it waiting.
+
 ## 0.0.4
 
 `pcenter analytics acquisitions` reports how many times the app was acquired, per day, week

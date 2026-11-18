@@ -149,6 +149,7 @@ func TestAuthLoginPromptsOnlyWhenAttachedToTerminal(t *testing.T) {
 		Stderr:      &stderrBuf,
 		Environment: environment,
 		IsTTY:       true,
+		StdinIsTTY:  true,
 		Now:         func() time.Time { return time.Date(2026, 7, 13, 12, 0, 0, 0, time.UTC) },
 		Clock:       instantClock{},
 		Rand:        cliFixedRand(1),
@@ -176,6 +177,44 @@ func TestAuthLoginPromptsOnlyWhenAttachedToTerminal(t *testing.T) {
 	}
 	if !strings.Contains(string(contents), "MS_STORE_CLIENT_SECRET=typed-secret") {
 		t.Fatalf("prompted secret not stored: %s", contents)
+	}
+}
+
+// Piping input while stdout is a terminal (`echo x | pcenter auth login`) must
+// not prompt: the prompt decision follows stdin, the output format follows
+// stdout.
+func TestAuthLoginDoesNotPromptWhenOnlyStdoutIsATerminal(t *testing.T) {
+	t.Parallel()
+	server := fullServer(t)
+	environment := hermetic(t, config.Environment{
+		"PCENTER_API_BASE":   server.APIBase(),
+		"PCENTER_LOGIN_BASE": server.LoginBase(),
+	})
+	envFile := filepath.Join(t.TempDir(), "credentials.env")
+	prompted := false
+	prompt := func(string) (string, error) {
+		prompted = true
+		return "typed", nil
+	}
+	var stdout, stderr bytes.Buffer
+	exitCode := cli.Execute(context.Background(), []string{"--env-file", envFile, "auth", "login"}, cli.Dependencies{
+		Stdout:       &stdout,
+		Stderr:       &stderr,
+		Environment:  environment,
+		IsTTY:        true,
+		StdinIsTTY:   false,
+		Now:          func() time.Time { return time.Date(2026, 7, 13, 12, 0, 0, 0, time.UTC) },
+		Clock:        instantClock{},
+		Rand:         cliFixedRand(1),
+		PromptLine:   prompt,
+		PromptSecret: prompt,
+		Keychain:     config.NewMemoryKeychain(),
+	})
+	if prompted {
+		t.Fatal("login prompted although stdin is not a terminal")
+	}
+	if exitCode != output.ExitUsage || !strings.Contains(stderr.String(), "stdin is not a terminal") {
+		t.Fatalf("exit = %d stderr = %q, want a usage error about stdin", exitCode, stderr.String())
 	}
 }
 

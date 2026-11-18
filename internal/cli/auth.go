@@ -667,7 +667,7 @@ func missingFrom(values map[string]string, names []string) []string {
 }
 
 func (s *commandState) promptFor(name string) (string, error) {
-	if !s.dependencies.IsTTY {
+	if !s.dependencies.StdinIsTTY {
 		return "", fmt.Errorf("%s is not set and stdin is not a terminal; pass --%s", name, flagNameFor(name))
 	}
 	prompt := fmt.Sprintf("%s: ", name)

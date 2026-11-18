@@ -39,14 +39,18 @@ type Dependencies struct {
 	Stdout      io.Writer
 	Stderr      io.Writer
 	Environment config.Environment
-	IsTTY       bool
-	Now         func() time.Time
-	Build       BuildInfo
-	HTTPClient  *http.Client
-	Clock       store.Clock
-	Rand        store.Rand
+	// IsTTY reports whether stdout is a terminal; it picks the output format.
+	IsTTY bool
+	// StdinIsTTY reports whether stdin is a terminal; only then may `auth
+	// login` prompt, so piped input can never leave it waiting.
+	StdinIsTTY bool
+	Now        func() time.Time
+	Build      BuildInfo
+	HTTPClient *http.Client
+	Clock      store.Clock
+	Rand       store.Rand
 	// PromptLine and PromptSecret are only ever called by `auth login`, and
-	// only when IsTTY. Injected so the prompting path is testable without a pty.
+	// only when StdinIsTTY. Injected so the prompting path is testable without a pty.
 	PromptLine   func(prompt string) (string, error)
 	PromptSecret func(prompt string) (string, error)
 	// Keychain is the system credential store. Nil means there is none, which
