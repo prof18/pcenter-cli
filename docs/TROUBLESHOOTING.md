@@ -45,7 +45,25 @@ chmod 600 ~/.config/pcenter/credentials.env
 
 ### `auth login` exits instead of prompting
 
-By design. Prompting happens only when stdin is a terminal, so the command can never hang a script or a CI job. The message names the flag to pass. Supply every value as a flag to run it unattended — or, in CI, don't use it at all.
+By design. Prompting happens only when stdin is a terminal, so the command can never hang a script or a CI job. The message names the flag to pass. Supply every value as a flag to run it unattended — or, in CI, don't use it at all. Flags stop pcenter prompting, but reading the system keychain can still make the operating system show an unlock prompt: an unattended login also sets `PCENTER_BYPASS_KEYCHAIN=1`, which writes the credentials file instead.
+
+### `auth login` says it could not use the system keychain
+
+`auth login` stores credentials in the system keychain and never falls back to the file on its own. On a machine without a keychain (a headless Linux box, a container) or with a locked one (macOS over SSH), store them in the file instead:
+
+```bash
+PCENTER_BYPASS_KEYCHAIN=1 pcenter auth login --storage file
+```
+
+Keep `PCENTER_BYPASS_KEYCHAIN=1` set on that machine so later commands skip the keychain too.
+
+### `auth doctor` warns about the keychain
+
+The `keychain` check is a warning when pcenter could not read the keychain, usually because it is locked or the machine has none. Commands still work with credentials from flags, the environment or a file. Unlock the keychain, or set `PCENTER_BYPASS_KEYCHAIN=1` to stop pcenter trying. The check fails when the keychain item is not valid JSON; `pcenter auth login --storage keychain` overwrites it.
+
+### `auth doctor` warns about a shadowed file
+
+The keychain holds credentials, and `~/.config/pcenter/credentials.env` still holds an account too. The keychain wins, so the file is ignored for those values. If the check says the file still supplies a value, such as the app id, keep the file. Otherwise you can delete it, unless a script names it with `--env-file` or `PCENTER_ENV_FILE`.
 
 ---
 

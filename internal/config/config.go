@@ -49,12 +49,20 @@ func CurrentEnvironment() Environment {
 	return result
 }
 
-// Resolve applies flag, environment, then env-file precedence and validates credentials.
-func Resolve(overrides Overrides, environment Environment) (Config, error) {
-	report, err := Inspect(overrides, environment)
+// Resolve applies flag, environment, env-file and keychain precedence and
+// validates credentials.
+func Resolve(overrides Overrides, environment Environment, keychain Keychain) (Config, error) {
+	report, err := Inspect(overrides, environment, keychain)
 	if err != nil {
 		return Config{}, err
 	}
+	return ValidateReport(report)
+}
+
+// ValidateReport applies the checks an operational command needs on top of
+// Inspect, so a command that already inspected credentials does not have to
+// read them, and the keychain, a second time.
+func ValidateReport(report Report) (Config, error) {
 	// An operational command told to read a specific file should say so when
 	// that file is not there, rather than silently falling back and failing
 	// later on a missing credential.
@@ -62,10 +70,15 @@ func Resolve(overrides Overrides, environment Environment) (Config, error) {
 		return Config{}, &EnvFileError{Path: report.EnvFile, Reason: os.ErrNotExist}
 	}
 	if missing := report.Missing(AllNames); len(missing) > 0 {
+		if report.EnvFileError != "" {
+			return Config{}, errors.New(report.EnvFileError)
+		}
 		return Config{}, &MissingConfigError{
-			Missing:       missing,
-			EnvFile:       report.EnvFile,
-			EnvFileExists: report.EnvFileExists,
+			Missing:         missing,
+			EnvFile:         report.EnvFile,
+			EnvFileExists:   report.EnvFileExists,
+			EnvFileExplicit: report.EnvFileExplicit,
+			KeychainState:   report.KeychainState,
 		}
 	}
 	return report.Config, nil

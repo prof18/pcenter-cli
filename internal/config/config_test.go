@@ -21,7 +21,7 @@ func TestResolvePrecedenceFlagThenEnvironmentThenFile(t *testing.T) {
 	resolved, err := config.Resolve(config.Overrides{TenantID: "flag-tenant", EnvFile: envFile}, config.Environment{
 		"MS_STORE_CLIENT_ID":     "env-client",
 		"MS_STORE_CLIENT_SECRET": "env-secret",
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,7 +38,7 @@ func TestResolveEnvFilePathPrecedence(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	resolved, err := config.Resolve(config.Overrides{}, config.Environment{"PCENTER_ENV_FILE": file})
+	resolved, err := config.Resolve(config.Overrides{}, config.Environment{"PCENTER_ENV_FILE": file}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +54,7 @@ func TestResolveStripsMatchingShellStyleQuotesFromEnvFileValues(t *testing.T) {
 	if err := os.WriteFile(file, contents, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	resolved, err := config.Resolve(config.Overrides{EnvFile: file}, nil)
+	resolved, err := config.Resolve(config.Overrides{EnvFile: file}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestResolveAllowsMissingDefaultFileWhenEnvironmentIsComplete(t *testing.T) 
 		"MS_STORE_CLIENT_ID":     "c",
 		"MS_STORE_CLIENT_SECRET": "s",
 		"MS_STORE_APP_ID":        "a",
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,7 @@ func TestResolveAllowsMissingDefaultFileWhenEnvironmentIsComplete(t *testing.T) 
 
 func TestResolveRejectsMissingValuesAndMalformedFile(t *testing.T) {
 	t.Parallel()
-	_, err := config.Resolve(config.Overrides{EnvFile: filepath.Join(t.TempDir(), "missing.env")}, nil)
+	_, err := config.Resolve(config.Overrides{EnvFile: filepath.Join(t.TempDir(), "missing.env")}, nil, nil)
 	if err == nil || !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("explicit missing file error = %v", err)
 	}
@@ -90,7 +90,7 @@ func TestResolveRejectsMissingValuesAndMalformedFile(t *testing.T) {
 	if writeErr := os.WriteFile(file, []byte("NOT-A-PAIR\n"), 0o600); writeErr != nil {
 		t.Fatal(writeErr)
 	}
-	_, err = config.Resolve(config.Overrides{EnvFile: file}, nil)
+	_, err = config.Resolve(config.Overrides{EnvFile: file}, nil, nil)
 	if err == nil {
 		t.Fatal("malformed env file unexpectedly accepted")
 	}

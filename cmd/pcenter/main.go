@@ -25,6 +25,7 @@ func main() {
 		IsTTY:       output.IsTerminal(os.Stdout),
 		Now:         time.Now,
 		Build:       cli.BuildInfo{Version: version, Commit: commit, Date: buildDate},
+		Keychain:    config.SystemKeychain{},
 	})
 	os.Exit(exitCode)
 }

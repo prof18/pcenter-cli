@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -460,4 +462,680 @@ func rejectingServer(t *testing.T) *fakestore.Server {
 	return fakestore.New(t, fakestore.Options{
 		AppID: "APP", App: fakestore.App{ID: "APP"}, RejectToken: true,
 	})
+}
+
+func seedKeychain(t *testing.T, values map[string]string) *config.MemoryKeychain {
+	t.Helper()
+	keychain := config.NewMemoryKeychain()
+	if err := config.SaveKeychain(keychain, values); err != nil {
+		t.Fatalf("seed keychain: %v", err)
+	}
+	return keychain
+}
+
+func storedCredentials() map[string]string {
+	return map[string]string{
+		config.TenantIDName:     "tenant",
+		config.ClientIDName:     "client",
+		config.ClientSecretName: "secret",
+		config.AppIDName:        "APP",
+	}
+}
+
+func serverEnvironment(server *fakestore.Server) config.Environment {
+	return config.Environment{
+		"PCENTER_API_BASE":   server.APIBase(),
+		"PCENTER_LOGIN_BASE": server.LoginBase(),
+	}
+}
+
+func TestOperationalCommandReadsCredentialsFromTheKeychain(t *testing.T) {
+	t.Parallel()
+	server := fullServer(t)
+	keychain := seedKeychain(t, storedCredentials())
+	stdout, stderr, exitCode := executeWithKeychain(t, keychain, serverEnvironment(server),
+		[]string{"--output", "json", "app", "info"}, cli.BuildInfo{})
+	if exitCode != output.ExitSuccess {
+		t.Fatalf("exit = %d stderr = %q stdout = %q", exitCode, stderr, stdout)
+	}
+}
+
+// recordingKeychain counts calls on top of a MemoryKeychain, so a test can
+// prove which branch ran.
+type recordingKeychain struct {
+	*config.MemoryKeychain
+	mu   sync.Mutex
+	gets int
+	sets int
+}
+
+func (r *recordingKeychain) Get(service, account string) (string, error) {
+	r.mu.Lock()
+	r.gets++
+	r.mu.Unlock()
+	return r.MemoryKeychain.Get(service, account)
+}
+
+func (r *recordingKeychain) Set(service, account, secret string) error {
+	r.mu.Lock()
+	r.sets++
+	r.mu.Unlock()
+	return r.MemoryKeychain.Set(service, account, secret)
+}
+
+func (r *recordingKeychain) counts() (gets, sets int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.gets, r.sets
+}
+
+// executeAtHome runs pcenter against a temporary HOME with no
+// PCENTER_ENV_FILE, so the default credentials path is the one in use. Tests
+// that call it must not be parallel.
+func executeAtHome(t *testing.T, keychain config.Keychain, environment config.Environment, args ...string) (stdout, stderr string, exitCode int, defaultFile string) {
+	t.Helper()
+	defaultFile = useTempHome(t)
+	stdout, stderr, exitCode = executeInHome(t, keychain, environment, args...)
+	return stdout, stderr, exitCode, defaultFile
+}
+
+// useTempHome points HOME at a temporary directory and returns the default
+// credentials path under it. Tests that call it must not be parallel.
+func useTempHome(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	defaultFile, err := config.DefaultEnvFile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return defaultFile
+}
+
+// executeInHome runs pcenter with no PCENTER_ENV_FILE against whatever HOME
+// the test set up.
+func executeInHome(t *testing.T, keychain config.Keychain, environment config.Environment, args ...string) (stdout, stderr string, exitCode int) {
+	t.Helper()
+	var out, errOut bytes.Buffer
+	exitCode = cli.Execute(context.Background(), args, cli.Dependencies{
+		Stdout:      &out,
+		Stderr:      &errOut,
+		Environment: environment,
+		Now:         func() time.Time { return time.Date(2026, 7, 13, 12, 0, 0, 0, time.UTC) },
+		Clock:       instantClock{},
+		Rand:        cliFixedRand(1),
+		Keychain:    keychain,
+	})
+	return out.String(), errOut.String(), exitCode
+}
+
+var accountFlags = []string{"--tenant-id", "tenant", "--client-id", "client", "--client-secret", "secret"}
+
+func loginArgs(extra ...string) []string {
+	return append(append([]string{"--output", "json", "auth", "login"}, accountFlags...), extra...)
+}
+
+func assertAbsent(t *testing.T, path string) {
+	t.Helper()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("%s should not exist, stat err = %v", path, err)
+	}
+}
+
+func assertKeychainHolds(t *testing.T, keychain config.Keychain, want map[string]string) {
+	t.Helper()
+	got, err := config.LoadKeychain(keychain)
+	if err != nil {
+		t.Fatalf("load keychain: %v", err)
+	}
+	if len(got) != len(want) {
+		t.Fatalf("keychain = %v, want %v", got, want)
+	}
+	for key, value := range want {
+		if got[key] != value {
+			t.Fatalf("keychain[%s] = %q, want %q", key, got[key], value)
+		}
+	}
+}
+
+var accountValues = map[string]string{
+	config.TenantIDName: "tenant", config.ClientIDName: "client", config.ClientSecretName: "secret",
+}
+
+func TestAuthLoginStoresInTheKeychainWithStorageFlag(t *testing.T) {
+	t.Parallel()
+	server := fullServer(t)
+	envFile := filepath.Join(t.TempDir(), "credentials.env")
+	if err := os.WriteFile(envFile, []byte("# before\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	environment := serverEnvironment(server)
+	environment["PCENTER_ENV_FILE"] = envFile
+	keychain := config.NewMemoryKeychain()
+	stdout, stderr, exitCode := executeWithKeychain(t, keychain, environment, loginArgs("--storage", "keychain"), cli.BuildInfo{})
+	if exitCode != output.ExitSuccess {
+		t.Fatalf("exit = %d stderr = %q", exitCode, stderr)
+	}
+	assertKeychainHolds(t, keychain, accountValues)
+	contents, err := os.ReadFile(envFile)
+	if err != nil || string(contents) != "# before\n" {
+		t.Fatalf("explicit file changed: %q (%v)", contents, err)
+	}
+	if !strings.Contains(stdout, `"storage":"keychain"`) {
+		t.Fatalf("stdout = %s", stdout)
+	}
+	if strings.Contains(stdout, "secret\"") || strings.Contains(stdout, ":\"secret") {
+		t.Fatalf("stdout leaked the secret: %s", stdout)
+	}
+}
+
+func TestAuthLoginWithEnvFileStillWritesTheFile(t *testing.T) {
+	t.Parallel()
+	server := fullServer(t)
+	envFile := filepath.Join(t.TempDir(), "credentials.env")
+	keychain := config.NewMemoryKeychain()
+	stdout, stderr, exitCode := executeWithKeychain(t, keychain, serverEnvironment(server),
+		append([]string{"--env-file", envFile}, loginArgs()...), cli.BuildInfo{})
+	if exitCode != output.ExitSuccess || !strings.Contains(stdout, `"storage":"file"`) {
+		t.Fatalf("exit = %d stdout = %s stderr = %q", exitCode, stdout, stderr)
+	}
+	assertKeychainHolds(t, keychain, map[string]string{})
+	if _, err := os.Stat(envFile); err != nil {
+		t.Fatalf("file not written: %v", err)
+	}
+}
+
+func TestAuthLoginDefaultsToTheKeychain(t *testing.T) {
+	server := fullServer(t)
+	keychain := config.NewMemoryKeychain()
+	stdout, stderr, exitCode, defaultFile := executeAtHome(t, keychain, serverEnvironment(server), loginArgs()...)
+	if exitCode != output.ExitSuccess || !strings.Contains(stdout, `"storage":"keychain"`) {
+		t.Fatalf("exit = %d stdout = %s stderr = %q", exitCode, stdout, stderr)
+	}
+	assertKeychainHolds(t, keychain, accountValues)
+	assertAbsent(t, defaultFile)
+}
+
+func TestAuthLoginWithoutAKeychainFails(t *testing.T) {
+	server := fullServer(t)
+	_, stderr, exitCode, defaultFile := executeAtHome(t, nil, fakeEnvironment(server), "--output", "json", "auth", "login")
+	if exitCode != output.ExitFailure {
+		t.Fatalf("exit = %d stderr = %q", exitCode, stderr)
+	}
+	assertAbsent(t, defaultFile)
+}
+
+func TestAuthLoginFailsWhenTheKeychainCannotBeRead(t *testing.T) {
+	server := fullServer(t)
+	keychain := config.NewMemoryKeychain()
+	keychain.Err = errors.New("keychain locked")
+	_, stderr, exitCode, defaultFile := executeAtHome(t, keychain, serverEnvironment(server), loginArgs()...)
+	if exitCode != output.ExitFailure {
+		t.Fatalf("exit = %d stderr = %q", exitCode, stderr)
+	}
+	for _, expected := range []string{"--storage file", "PCENTER_BYPASS_KEYCHAIN"} {
+		if !strings.Contains(stderr, expected) {
+			t.Fatalf("stderr should mention %q: %s", expected, stderr)
+		}
+	}
+	assertAbsent(t, defaultFile)
+}
+
+func TestAuthLoginFailsWhenTheKeychainWriteFails(t *testing.T) {
+	for name, extra := range map[string][]string{"explicit": {"--storage", "keychain"}, "default": nil} {
+		t.Run(name, func(t *testing.T) {
+			server := fullServer(t)
+			inner := config.NewMemoryKeychain()
+			inner.SetErr = errors.New("write refused")
+			keychain := &recordingKeychain{MemoryKeychain: inner}
+			_, stderr, exitCode, defaultFile := executeAtHome(t, keychain, serverEnvironment(server), loginArgs(extra...)...)
+			if _, sets := keychain.counts(); sets == 0 {
+				t.Fatal("Set was never attempted")
+			}
+			if exitCode != output.ExitFailure {
+				t.Fatalf("exit = %d stderr = %q", exitCode, stderr)
+			}
+			for _, expected := range []string{"store credentials in the keychain", "--storage file"} {
+				if !strings.Contains(stderr, expected) {
+					t.Fatalf("stderr should mention %q: %s", expected, stderr)
+				}
+			}
+			assertAbsent(t, defaultFile)
+		})
+	}
+}
+
+func TestAuthLoginStorageFileCopiesKeychainValues(t *testing.T) {
+	t.Parallel()
+	server := fullServer(t)
+	keychain := seedKeychain(t, accountValues)
+	envFile := filepath.Join(t.TempDir(), "credentials.env")
+	environment := serverEnvironment(server)
+	environment["PCENTER_ENV_FILE"] = envFile
+	_, stderr, exitCode := executeWithKeychain(t, keychain, environment,
+		[]string{"--output", "json", "auth", "login", "--storage", "file", "--app-id", "APP"}, cli.BuildInfo{})
+	if exitCode != output.ExitSuccess {
+		t.Fatalf("exit = %d stderr = %q", exitCode, stderr)
+	}
+	contents, err := os.ReadFile(envFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"MS_STORE_TENANT_ID=tenant", "MS_STORE_CLIENT_ID=client", "MS_STORE_CLIENT_SECRET=secret", "MS_STORE_APP_ID=APP"} {
+		if !strings.Contains(string(contents), expected) {
+			t.Fatalf("file missing %q: %s", expected, contents)
+		}
+	}
+}
+
+func TestAuthLoginStorageFileWarnsWhenTheEnvironmentHidesTheKeychain(t *testing.T) {
+	for name, seeded := range map[string]bool{"old secret": true, "empty": false} {
+		t.Run(name, func(t *testing.T) {
+			server := fullServer(t)
+			inner := config.NewMemoryKeychain()
+			if seeded {
+				inner = seedKeychain(t, map[string]string{config.ClientSecretName: "old"})
+			}
+			keychain := &recordingKeychain{MemoryKeychain: inner}
+			stdout, stderr, exitCode, _ := executeAtHome(t, keychain, fakeEnvironment(server),
+				"--output", "json", "auth", "login", "--storage", "file")
+			if exitCode != output.ExitSuccess {
+				t.Fatalf("exit = %d stderr = %q", exitCode, stderr)
+			}
+			if gets, _ := keychain.counts(); gets == 0 {
+				t.Fatal("login never read the keychain")
+			}
+			warned := strings.Contains(stdout, "takes precedence")
+			if warned != seeded {
+				t.Fatalf("precedence warning = %v, want %v: %s", warned, seeded, stdout)
+			}
+		})
+	}
+}
+
+func TestAuthLoginRejectsMixedEnvironmentAccount(t *testing.T) {
+	t.Parallel()
+	server := fullServer(t)
+	cases := []struct {
+		name     string
+		args     []string
+		fileIDs  bool
+		wantExit int
+	}{
+		{"ids from flags", []string{"--tenant-id", "tenant", "--client-id", "client"}, false, output.ExitUsage},
+		{"ids from the file", []string{"--storage", "keychain"}, true, output.ExitUsage},
+		{"everything from flags", append([]string{"--storage", "keychain"}, accountFlags...), false, output.ExitSuccess},
+	}
+	for _, c := range cases {
+		keychain := seedKeychain(t, map[string]string{config.ClientSecretName: "old"})
+		envFile := filepath.Join(t.TempDir(), "credentials.env")
+		if c.fileIDs {
+			if err := config.Save(envFile, map[string]string{config.TenantIDName: "tenant", config.ClientIDName: "client"}); err != nil {
+				t.Fatal(err)
+			}
+		} else if err := os.WriteFile(envFile, []byte("# empty\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		environment := serverEnvironment(server)
+		environment["PCENTER_ENV_FILE"] = envFile
+		environment[config.ClientSecretName] = "env-secret"
+		_, stderr, exitCode := executeWithKeychain(t, keychain, environment,
+			append([]string{"--output", "json", "auth", "login"}, c.args...), cli.BuildInfo{})
+		if exitCode != c.wantExit {
+			t.Fatalf("%s: exit = %d, want %d (stderr %q)", c.name, exitCode, c.wantExit, stderr)
+		}
+		want := map[string]string{config.ClientSecretName: "old"}
+		if c.wantExit == output.ExitSuccess {
+			want = accountValues
+		}
+		assertKeychainHolds(t, keychain, want)
+	}
+}
+
+func TestAuthLoginStorageFileRejectsQuotedValues(t *testing.T) {
+	t.Parallel()
+	server := fullServer(t)
+	for _, secret := range []string{`"quoted`, "padded "} {
+		keychain := seedKeychain(t, map[string]string{
+			config.TenantIDName: "tenant", config.ClientIDName: "client", config.ClientSecretName: secret,
+		})
+		envFile := filepath.Join(t.TempDir(), "credentials.env")
+		environment := serverEnvironment(server)
+		environment["PCENTER_ENV_FILE"] = envFile
+		_, stderr, exitCode := executeWithKeychain(t, keychain, environment,
+			[]string{"--output", "json", "auth", "login", "--storage", "file"}, cli.BuildInfo{})
+		if exitCode != output.ExitUsage || !strings.Contains(stderr, config.ClientSecretName) {
+			t.Fatalf("secret %q: exit = %d stderr = %q", secret, exitCode, stderr)
+		}
+		assertAbsent(t, envFile)
+	}
+}
+
+func TestAuthLoginRejectsMultilineValues(t *testing.T) {
+	t.Parallel()
+	server := fullServer(t)
+	envFile := seededEnvFile(t, "# before\n")
+	environment := serverEnvironment(server)
+	environment["PCENTER_ENV_FILE"] = envFile
+	keychain := config.NewMemoryKeychain()
+	_, stderr, exitCode := executeWithKeychain(t, keychain, environment, []string{"--output", "json", "auth", "login",
+		"--storage", "keychain", "--tenant-id", "tenant", "--client-id", "client", "--client-secret", "two\nlines"}, cli.BuildInfo{})
+	if exitCode != output.ExitUsage || !strings.Contains(stderr, "line break") {
+		t.Fatalf("exit = %d stderr = %q", exitCode, stderr)
+	}
+	if contents, err := os.ReadFile(envFile); err != nil || string(contents) != "# before\n" {
+		t.Fatalf("file changed: %q (%v)", contents, err)
+	}
+	assertKeychainHolds(t, keychain, map[string]string{})
+}
+
+func TestAuthLoginBypassZeroKeepsTheKeychain(t *testing.T) {
+	t.Parallel()
+	server := fullServer(t)
+	keychain := config.NewMemoryKeychain()
+	environment := serverEnvironment(server)
+	environment[config.BypassKeychainEnv] = "0"
+	stdout, stderr, exitCode := executeWithKeychain(t, keychain, environment, loginArgs("--storage", "keychain"), cli.BuildInfo{})
+	if exitCode != output.ExitSuccess || !strings.Contains(stdout, `"storage":"keychain"`) {
+		t.Fatalf("bypass=0: exit = %d stdout = %s stderr = %q", exitCode, stdout, stderr)
+	}
+}
+
+func TestAuthLoginBypassWritesTheDefaultFile(t *testing.T) {
+	server := fullServer(t)
+	keychain := &recordingKeychain{MemoryKeychain: config.NewMemoryKeychain()}
+	environment := serverEnvironment(server)
+	environment[config.BypassKeychainEnv] = "1"
+	stdout, stderr, exitCode, defaultFile := executeAtHome(t, keychain, environment, loginArgs()...)
+	if exitCode != output.ExitSuccess || !strings.Contains(stdout, `"storage":"file"`) {
+		t.Fatalf("exit = %d stdout = %s stderr = %q", exitCode, stdout, stderr)
+	}
+	if _, err := os.Stat(defaultFile); err != nil {
+		t.Fatalf("default file not written: %v", err)
+	}
+	if gets, sets := keychain.counts(); gets != 0 || sets != 0 {
+		t.Fatalf("bypassed keychain was used: %d gets, %d sets", gets, sets)
+	}
+}
+
+func TestAuthLoginRequiresValuesToRepairAnInvalidItem(t *testing.T) {
+	t.Parallel()
+	server := fullServer(t)
+	keychain := config.NewMemoryKeychain()
+	if err := keychain.Set(config.KeychainService, config.KeychainAccount, "not json"); err != nil {
+		t.Fatal(err)
+	}
+	environment := fakeEnvironment(server)
+	environment["PCENTER_ENV_FILE"] = seededEnvFile(t, "# empty\n")
+	_, stderr, exitCode := executeWithKeychain(t, keychain, environment,
+		[]string{"--output", "json", "auth", "login", "--storage", "keychain"}, cli.BuildInfo{})
+	if exitCode != output.ExitUsage || !strings.Contains(stderr, "--client-secret") {
+		t.Fatalf("exit = %d stderr = %q", exitCode, stderr)
+	}
+}
+
+func TestAuthLoginBypassRejectsStorageKeychain(t *testing.T) {
+	t.Parallel()
+	environment := config.Environment{config.BypassKeychainEnv: "1"}
+	_, stderr, exitCode := executeWithKeychain(t, config.NewMemoryKeychain(), environment, loginArgs("--storage", "keychain"), cli.BuildInfo{})
+	if exitCode != output.ExitUsage || !strings.Contains(stderr, config.BypassKeychainEnv) {
+		t.Fatalf("exit = %d stderr = %q", exitCode, stderr)
+	}
+}
+
+func TestAuthLoginStorageKeychainRejectsAMissingExplicitFile(t *testing.T) {
+	t.Parallel()
+	server := fullServer(t)
+	environment := serverEnvironment(server)
+	environment["PCENTER_ENV_FILE"] = filepath.Join(t.TempDir(), "absent.env")
+	keychain := config.NewMemoryKeychain()
+	_, stderr, exitCode := executeWithKeychain(t, keychain, environment, loginArgs("--storage", "keychain"), cli.BuildInfo{})
+	if exitCode != output.ExitUsage {
+		t.Fatalf("exit = %d stderr = %q", exitCode, stderr)
+	}
+	assertKeychainHolds(t, keychain, map[string]string{})
+}
+
+func TestAuthLoginRejectsUnknownStorage(t *testing.T) {
+	t.Parallel()
+	_, _, exitCode := execute(t, config.Environment{}, loginArgs("--storage", "vault"), cli.BuildInfo{})
+	if exitCode != output.ExitUsage {
+		t.Fatalf("exit = %d, want usage", exitCode)
+	}
+}
+
+func logoutWith(t *testing.T, keychain config.Keychain, environment config.Environment, envFile string) (string, string, int) {
+	t.Helper()
+	return executeWithKeychain(t, keychain, environment,
+		[]string{"--output", "json", "--env-file", envFile, "auth", "logout", "--yes"}, cli.BuildInfo{})
+}
+
+func seededEnvFile(t *testing.T, contents string) string {
+	t.Helper()
+	envFile := filepath.Join(t.TempDir(), "credentials.env")
+	if err := os.WriteFile(envFile, []byte(contents), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return envFile
+}
+
+func TestAuthLogoutClearsTheKeychainAndTheFile(t *testing.T) {
+	t.Parallel()
+	keychain := seedKeychain(t, accountValues)
+	envFile := seededEnvFile(t, "MS_STORE_TENANT_ID=tenant\n")
+	stdout, stderr, exitCode := logoutWith(t, keychain, config.Environment{}, envFile)
+	if exitCode != output.ExitSuccess || !strings.Contains(stdout, `"removed":true`) || !strings.Contains(stdout, `"keychain":"removed"`) {
+		t.Fatalf("exit = %d stdout = %s stderr = %q", exitCode, stdout, stderr)
+	}
+	assertAbsent(t, envFile)
+	assertKeychainHolds(t, keychain, map[string]string{})
+
+	stdout, stderr, exitCode = logoutWith(t, keychain, config.Environment{}, envFile)
+	if exitCode != output.ExitSuccess || !strings.Contains(stdout, `"keychain":"nothing to remove"`) {
+		t.Fatalf("second logout: exit = %d stdout = %s stderr = %q", exitCode, stdout, stderr)
+	}
+}
+
+func TestAuthLogoutBypassLeavesTheKeychain(t *testing.T) {
+	t.Parallel()
+	keychain := seedKeychain(t, accountValues)
+	envFile := seededEnvFile(t, "MS_STORE_TENANT_ID=tenant\n")
+	stdout, stderr, exitCode := logoutWith(t, keychain, config.Environment{config.BypassKeychainEnv: "1"}, envFile)
+	if exitCode != output.ExitSuccess || !strings.Contains(stdout, `"keychain":"bypassed"`) {
+		t.Fatalf("exit = %d stdout = %s stderr = %q", exitCode, stdout, stderr)
+	}
+	assertKeychainHolds(t, keychain, accountValues)
+}
+
+func TestAuthLogoutKeepsTheKeychainWithoutConfirmation(t *testing.T) {
+	t.Parallel()
+	keychain := seedKeychain(t, accountValues)
+	envFile := seededEnvFile(t, "MS_STORE_TENANT_ID=tenant\n")
+	_, _, exitCode := executeWithKeychain(t, keychain, config.Environment{},
+		[]string{"--env-file", envFile, "auth", "logout"}, cli.BuildInfo{})
+	if exitCode != output.ExitUsage {
+		t.Fatalf("exit = %d, want usage", exitCode)
+	}
+	assertKeychainHolds(t, keychain, accountValues)
+}
+
+func TestAuthLogoutDeletesAMalformedKeychainItem(t *testing.T) {
+	t.Parallel()
+	keychain := config.NewMemoryKeychain()
+	if err := keychain.Set(config.KeychainService, config.KeychainAccount, "not json"); err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, exitCode := logoutWith(t, keychain, config.Environment{}, filepath.Join(t.TempDir(), "absent.env"))
+	if exitCode != output.ExitSuccess || !strings.Contains(stdout, `"keychain":"removed"`) {
+		t.Fatalf("exit = %d stdout = %s stderr = %q", exitCode, stdout, stderr)
+	}
+}
+
+func TestAuthLogoutFailsWhenTheKeychainDeleteFails(t *testing.T) {
+	t.Parallel()
+	keychain := seedKeychain(t, accountValues)
+	keychain.DeleteErr = errors.New("delete refused")
+	envFile := seededEnvFile(t, "MS_STORE_TENANT_ID=tenant\n")
+	_, stderr, exitCode := logoutWith(t, keychain, config.Environment{}, envFile)
+	if exitCode != output.ExitFailure || !strings.Contains(stderr, "keychain") {
+		t.Fatalf("exit = %d stderr = %q", exitCode, stderr)
+	}
+	assertAbsent(t, envFile)
+}
+
+func TestAuthLogoutWorksWithAMalformedEnvFile(t *testing.T) {
+	t.Parallel()
+	keychain := seedKeychain(t, accountValues)
+	envFile := seededEnvFile(t, "not an env line\n")
+	stdout, stderr, exitCode := logoutWith(t, keychain, config.Environment{}, envFile)
+	if exitCode != output.ExitSuccess || !strings.Contains(stdout, `"keychain":"removed"`) {
+		t.Fatalf("exit = %d stdout = %s stderr = %q", exitCode, stdout, stderr)
+	}
+	assertAbsent(t, envFile)
+}
+
+func TestAuthLogoutRefusesADirectory(t *testing.T) {
+	t.Parallel()
+	keychain := seedKeychain(t, accountValues)
+	directory := t.TempDir()
+	_, stderr, exitCode := logoutWith(t, keychain, config.Environment{}, directory)
+	if exitCode != output.ExitFailure || !strings.Contains(stderr, "is a directory") {
+		t.Fatalf("exit = %d stderr = %q", exitCode, stderr)
+	}
+	if info, err := os.Stat(directory); err != nil || !info.IsDir() {
+		t.Fatalf("directory should survive: %v", err)
+	}
+	assertKeychainHolds(t, keychain, map[string]string{})
+}
+
+func TestAuthLogoutFailsWhenTheItemSurvivesDelete(t *testing.T) {
+	t.Parallel()
+	keychain := seedKeychain(t, accountValues)
+	keychain.KeepOnDelete = true
+	_, stderr, exitCode := logoutWith(t, keychain, config.Environment{}, filepath.Join(t.TempDir(), "absent.env"))
+	if exitCode != output.ExitFailure || !strings.Contains(stderr, "still present") {
+		t.Fatalf("exit = %d stderr = %q", exitCode, stderr)
+	}
+}
+
+func TestAuthLogoutFailsWithAnUnreachableKeychain(t *testing.T) {
+	t.Parallel()
+	keychain := config.NewMemoryKeychain()
+	keychain.Err = errors.New("locked")
+	envFile := seededEnvFile(t, "MS_STORE_TENANT_ID=tenant\n")
+	_, stderr, exitCode := logoutWith(t, keychain, config.Environment{}, envFile)
+	if exitCode != output.ExitFailure || !strings.Contains(stderr, config.BypassKeychainEnv) {
+		t.Fatalf("exit = %d stderr = %q", exitCode, stderr)
+	}
+	assertAbsent(t, envFile)
+}
+
+func TestAuthStatusOfflineReportsKeychainSources(t *testing.T) {
+	t.Parallel()
+	keychain := seedKeychain(t, storedCredentials())
+	stdout, stderr, exitCode := executeWithKeychain(t, keychain, config.Environment{},
+		[]string{"--output", "json", "auth", "status", "--offline"}, cli.BuildInfo{})
+	if exitCode != output.ExitSuccess {
+		t.Fatalf("exit = %d stderr = %q", exitCode, stderr)
+	}
+	var payload struct {
+		Sources  map[string]string `json:"sources"`
+		Keychain string            `json:"keychain"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("decode %s: %v", stdout, err)
+	}
+	for _, name := range config.AllNames {
+		if payload.Sources[name] != "keychain" {
+			t.Fatalf("%s source = %q, want keychain", name, payload.Sources[name])
+		}
+	}
+	if payload.Keychain != "found" {
+		t.Fatalf("keychain = %q, want found", payload.Keychain)
+	}
+}
+
+func TestAuthStatusReadsTheKeychainOnce(t *testing.T) {
+	t.Parallel()
+	server := fullServer(t)
+	keychain := &recordingKeychain{MemoryKeychain: seedKeychain(t, storedCredentials())}
+	_, stderr, exitCode := executeWithKeychain(t, keychain, serverEnvironment(server),
+		[]string{"--output", "json", "auth", "status"}, cli.BuildInfo{})
+	if exitCode != output.ExitSuccess {
+		t.Fatalf("exit = %d stderr = %q", exitCode, stderr)
+	}
+	if gets, _ := keychain.counts(); gets != 1 {
+		t.Fatalf("keychain read %d times, want 1", gets)
+	}
+
+	absent := filepath.Join(t.TempDir(), "absent.env")
+	for name, environment := range map[string]config.Environment{
+		"complete":   fakeEnvironment(server),
+		"incomplete": {config.TenantIDName: "tenant"},
+	} {
+		_, stderr, exitCode := executeWithKeychain(t, config.NewMemoryKeychain(), environment,
+			[]string{"--output", "json", "--env-file", absent, "auth", "status"}, cli.BuildInfo{})
+		if exitCode != output.ExitUsage || !strings.Contains(stderr, `"env_file"`) {
+			t.Fatalf("%s: exit = %d stderr = %q", name, exitCode, stderr)
+		}
+	}
+}
+
+func TestAuthDoctorReportsTheKeychainCheck(t *testing.T) {
+	t.Parallel()
+	server := fullServer(t)
+	keychain := seedKeychain(t, storedCredentials())
+	stdout, stderr, exitCode := executeWithKeychain(t, keychain, serverEnvironment(server),
+		[]string{"--output", "json", "auth", "doctor"}, cli.BuildInfo{})
+	if exitCode != output.ExitSuccess {
+		t.Fatalf("exit = %d stdout = %s stderr = %q", exitCode, stdout, stderr)
+	}
+	report := decodeDoctor(t, stdout)
+	if !report.OK || report.status("keychain") != "ok" {
+		t.Fatalf("doctor = %s", stdout)
+	}
+}
+
+func TestAuthDoctorWarnsWhenTheKeychainShadowsTheDefaultFile(t *testing.T) {
+	server := fullServer(t)
+	keychain := seedKeychain(t, storedCredentials())
+	defaultFile := useTempHome(t)
+	if err := config.Save(defaultFile, accountValues); err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, exitCode := executeInHome(t, keychain, serverEnvironment(server), "--output", "json", "auth", "doctor")
+	if exitCode != output.ExitSuccess {
+		t.Fatalf("exit = %d stdout = %s stderr = %q", exitCode, stdout, stderr)
+	}
+	report := decodeDoctor(t, stdout)
+	if !report.OK || report.status("shadowed file") != "warn" {
+		t.Fatalf("doctor = %s", stdout)
+	}
+}
+
+type doctorReport struct {
+	OK     bool `json:"ok"`
+	Checks []struct {
+		Check  string `json:"check"`
+		Status string `json:"status"`
+	} `json:"checks"`
+}
+
+func (r doctorReport) status(check string) string {
+	for _, c := range r.Checks {
+		if c.Check == check {
+			return c.Status
+		}
+	}
+	return ""
+}
+
+func decodeDoctor(t *testing.T, stdout string) doctorReport {
+	t.Helper()
+	var report doctorReport
+	if err := json.Unmarshal([]byte(stdout), &report); err != nil {
+		t.Fatalf("decode %s: %v", stdout, err)
+	}
+	return report
 }

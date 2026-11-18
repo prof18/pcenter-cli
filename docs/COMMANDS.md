@@ -14,7 +14,7 @@ Every `pcenter` command, its flags, and command-specific behavior. `pcenter <com
 - [`rollout`](#rollout) — `status`, `set-percentage`, `finalize`, `halt`
 - [`version`](#version)
 
-Output is a table at a terminal and JSON when piped. For the full automation contract, see [AUTOMATION.md](AUTOMATION.md). Mutating commands never prompt; destructive ones need an explicit flag.
+Output is a table at a terminal and JSON when piped. For the full automation contract, see [AUTOMATION.md](AUTOMATION.md). pcenter never prompts in mutating commands, but reading the system keychain can make the operating system show an unlock prompt; destructive commands need an explicit flag.
 
 ---
 
@@ -28,7 +28,7 @@ Output is a table at a terminal and JSON when piped. For the full automation con
 | `--verbose` | Log HTTP requests and response bodies to stderr, with secrets redacted. Safe to paste into an issue. |
 | `--version` / `-v` | Print version, commit and build date. Same as `pcenter version`. |
 
-Credentials resolve in this order, first hit wins: **flags → `MS_STORE_*` environment variables → credentials file**. See [Authentication](#auth).
+Credentials resolve in this order, first hit wins: **flags → `MS_STORE_*` environment variables → a credentials file named with `--env-file` or `PCENTER_ENV_FILE` → system keychain → the default credentials file**. See [Authentication](#auth).
 
 ---
 
@@ -38,21 +38,21 @@ Credentials resolve in this order, first hit wins: **flags → `MS_STORE_*` envi
 
 ```
 pcenter auth login [--tenant-id <id>] [--client-id <id>] [--client-secret <secret>]
-                   [--app-id <product-id>] [--skip-validation]
+                   [--app-id <product-id>] [--skip-validation] [--storage keychain|file]
 ```
 
-Writes credentials to the credentials file (`0600`, inside a `0700` directory) so other commands can find them.
+Stores credentials so other commands can find them: in the system keychain (service `pcenter`, account `default`) by default, or in the credentials file (`0600`, inside a `0700` directory) with `--storage file`, when `--env-file` or `PCENTER_ENV_FILE` names a file, or when `PCENTER_BYPASS_KEYCHAIN=1` is set. Login never falls back from the keychain to the file: if the keychain cannot be read or written, it fails and says to rerun with `--storage file`.
 
-- Values come from flags. Anything missing is **prompted for only when stdin is a terminal**; without one the command exits with a message naming the flag to pass, so it can never hang a script or a CI job. The client secret is read without echo.
-- Credentials are **verified against the Store before the file is written** — a mistyped secret fails here rather than halfway through a release. `--skip-validation` opts out.
-- Writing **merges**: keys already in the file that no flag replaces are kept, so adding an app id later does not discard the account credentials.
+- Values come from flags. Anything missing is **prompted for only when stdin is a terminal**; without one the command exits with a message naming the flag to pass, so it can never hang a script or a CI job. The client secret is read without echo. Passing every value as a flag stops pcenter prompting, but reading the keychain can still make the system show an unlock prompt; an unattended login sets `PCENTER_BYPASS_KEYCHAIN=1` and writes the file.
+- Credentials are **verified against the Store before they are stored** — a mistyped secret fails here rather than halfway through a release. `--skip-validation` opts out.
+- Writing **merges**: values already stored that no flag replaces are kept, so adding an app id later does not discard the account credentials. A keychain login also copies the values it keeps from the credentials file into the keychain item, but never changes the file.
 - `--app-id` is optional. One account can publish several apps, so the app id is usually better passed per command.
 
-In CI, don't use this command — set the `MS_STORE_*` variables from your secrets instead. They take precedence over the file and leave nothing on the runner.
+In CI, don't use this command — set the `MS_STORE_*` variables from your secrets instead. They take precedence over stored credentials and leave nothing on the runner.
 
 ### `auth status [--offline]`
 
-Reports where each setting resolved from (`flag`, `environment`, `env-file`, or unset) **without printing values**, then acquires a token and fetches the app to prove the credentials work. `--offline` stops after resolution and contacts nothing.
+Reports where each setting resolved from (`flag`, `environment`, `env-file`, `keychain`, or unset) and what happened to the keychain lookup (`found`, `empty`, `not-read`, `bypassed`, `unavailable`, `invalid`) **without printing values**, then acquires a token and fetches the app to prove the credentials work. `--offline` stops after resolution and sends nothing to the Store, but resolution can still read the system keychain, which can show an unlock prompt; set `PCENTER_BYPASS_KEYCHAIN=1` to avoid it.
 
 Failure stages have distinct exit codes: missing configuration → `2`, token rejected → `3`, app fetch failed → `1`.
 
@@ -62,7 +62,9 @@ The whole setup checked at once, reported in full rather than stopping at the fi
 
 | Check | What it covers |
 | --- | --- |
-| `env file` | Whether the file exists, its path, and its permission mode — it holds a client secret. |
+| `env file` | Whether the file exists, its path, and its permission mode — it holds a client secret. Fails when the file cannot be parsed. |
+| `keychain` | Whether the system keychain holds pcenter's item. A keychain that cannot be read is a warning; an item that is not valid JSON fails. |
+| `shadowed file` | A warning when the keychain overrides credentials still in the default file, and whether the file still supplies anything. |
 | `MS_STORE_TENANT_ID` … `MS_STORE_APP_ID` | One check per setting: whether it is set and which source won. |
 | `token` | Whether a token can actually be acquired. |
 | `app` | Whether the configured app is reachable. |
@@ -73,7 +75,7 @@ JSON is `{"ok": bool, "checks": [...]}` — read `.ok` rather than scanning stat
 
 ### `auth logout --yes`
 
-Deletes the credentials file. Idempotent — a missing file is reported as `nothing to remove`, not an error. Refuses to run without `--yes`.
+Deletes the credentials file and the keychain item. Idempotent — a missing file or item is reported as `nothing to remove`, not an error. If the keychain item cannot be deleted, for example because the keychain is locked, logout fails rather than leave working credentials behind; with `PCENTER_BYPASS_KEYCHAIN=1` it removes only the file. Refuses to run without `--yes`.
 
 ---
 

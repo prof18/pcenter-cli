@@ -49,6 +49,9 @@ type Dependencies struct {
 	// only when IsTTY. Injected so the prompting path is testable without a pty.
 	PromptLine   func(prompt string) (string, error)
 	PromptSecret func(prompt string) (string, error)
+	// Keychain is the system credential store. Nil means there is none, which
+	// commands treat like an unreadable keychain.
+	Keychain config.Keychain
 }
 
 type commandState struct {
@@ -63,6 +66,9 @@ type commandState struct {
 	publisher    *submissionflow.Publisher
 	listingPush  *submissionflow.ListingPublisher
 	config       config.Config
+	// inspected, when set, is a report prepareClient validates instead of
+	// resolving credentials again.
+	inspected *config.Report
 	// warnings accumulate so JSON output can carry them in the payload. Echoing
 	// them to stderr as prose too would make an agent reading both count each
 	// one twice, and one reading only stdout miss them entirely.
@@ -962,7 +968,16 @@ func (s *commandState) prepareClient() error {
 	if err := s.prepareOutput(); err != nil {
 		return err
 	}
-	resolved, err := config.Resolve(config.Overrides{EnvFile: s.envFile, AppID: s.appID}, s.dependencies.Environment)
+	var resolved config.Config
+	var err error
+	if s.inspected != nil {
+		// auth status and doctor already inspected credentials; reuse that so
+		// the online check uses what the report shows and the keychain, which
+		// can prompt to unlock, is read once.
+		resolved, err = config.ValidateReport(*s.inspected)
+	} else {
+		resolved, err = config.Resolve(config.Overrides{EnvFile: s.envFile, AppID: s.appID}, s.dependencies.Environment, s.dependencies.Keychain)
+	}
 	if err != nil {
 		return usageError{err}
 	}

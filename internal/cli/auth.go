@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -30,31 +31,49 @@ func (s *commandState) authCommand() *cobra.Command {
 
 type authLoginResult struct {
 	EnvFile   string   `json:"envFile"`
+	Storage   string   `json:"storage"`
 	Stored    []string `json:"stored"`
 	Kept      []string `json:"kept"`
 	Validated bool     `json:"validated"`
+	Warnings  []string `json:"warnings,omitempty"`
 }
+
+const (
+	storageKeychain = "keychain"
+	storageFile     = "file"
+)
+
+const keychainLabel = "system keychain (service " + config.KeychainService + ", account " + config.KeychainAccount + ")"
+
+const noKeychainRemedy = "rerun with --storage file, and set " + config.BypassKeychainEnv + "=1 if this machine has no keychain"
 
 func (s *commandState) authLoginCommand() *cobra.Command {
 	var overrides config.Overrides
 	var skipValidation bool
+	var storage string
 
 	command := &cobra.Command{
 		Use:   "login",
-		Short: "Store Partner Center credentials in the credentials file",
+		Short: "Store Partner Center credentials in the keychain or the credentials file",
 		Long: strings.TrimSpace(`
 Store Partner Center credentials so other commands can find them.
 
 Values are taken from flags when given, and prompted for otherwise — but only
-when stdin is a terminal, so scripts and CI never hang. Pass every value as a
-flag to run this unattended.
+when stdin is a terminal, so scripts and CI never hang. Passing every value as
+a flag stops pcenter prompting, but reading the system keychain can still make
+the operating system show an unlock prompt: unattended logins set
+PCENTER_BYPASS_KEYCHAIN=1 and write the credentials file.
 
 In GitHub Actions prefer the MS_STORE_* environment variables straight from
-your secrets: they need no file on the runner and take precedence over one.
+your secrets: they need no login on the runner and take precedence over
+stored credentials.
 
-Credentials go to ~/.config/pcenter/credentials.env unless --env-file or
-PCENTER_ENV_FILE says otherwise, written readable only by you. Values already
-in the file are kept unless a flag replaces them.
+Credentials go to the system keychain (service pcenter, account default). They
+go to ~/.config/pcenter/credentials.env instead, written readable only by you,
+with --storage file, when --env-file or PCENTER_ENV_FILE names a file, or when
+PCENTER_BYPASS_KEYCHAIN=1 is set. Login never falls back from the keychain to
+the file: if the keychain cannot be used, it fails and says so. Stored values
+are kept unless a flag replaces them.
 
 The app id is optional here: one account can publish several apps, so it is
 usually better passed per command with --app-id.`),
@@ -63,11 +82,19 @@ usually better passed per command with --app-id.`),
 			if err := s.prepareOutput(); err != nil {
 				return err
 			}
-			// The env file is the thing being written, so flag credentials must
+			// The store is the thing being written, so flag credentials must
 			// not be read back out of the environment here.
-			report, err := config.Inspect(config.Overrides{EnvFile: s.envFile}, s.dependencies.Environment)
+			report, err := config.Inspect(config.Overrides{EnvFile: s.envFile}, s.dependencies.Environment, s.dependencies.Keychain)
 			if err != nil {
 				return usageError{err}
+			}
+			target, explicitKeychain, err := s.chooseLoginStorage(cmd, storage, report)
+			if err != nil {
+				return err
+			}
+			s.refreshKeychainForLogin(&report)
+			if target == storageKeychain && report.KeychainState == config.KeychainUnavailable {
+				return failureError{fmt.Errorf("could not read the system keychain (%s); %s", report.KeychainError, noKeychainRemedy)}
 			}
 
 			flagValues := map[string]string{
@@ -78,7 +105,7 @@ usually better passed per command with --app-id.`),
 			}
 
 			values := map[string]string{}
-			result := authLoginResult{EnvFile: report.EnvFile}
+			result := authLoginResult{EnvFile: report.EnvFile, Storage: target}
 			for _, name := range config.AllNames {
 				existing := report.Value(name)
 				switch {
@@ -104,6 +131,16 @@ usually better passed per command with --app-id.`),
 				return usageError{fmt.Errorf("cannot save incomplete credentials: %s still unset", strings.Join(missing, ", "))}
 			}
 
+			payload, err := loginPayload(report, values, target)
+			if err != nil {
+				return usageError{err}
+			}
+			if target == storageKeychain && report.KeychainState == config.KeychainInvalid && !holdsAccountValue(payload) {
+				// Nothing would be written, so the broken item would survive a
+				// login that reports success.
+				return usageError{errors.New("the keychain item is not valid and nothing here would replace it; pass --tenant-id, --client-id and --client-secret to store a new one")}
+			}
+
 			if !skipValidation {
 				if err := s.verifyCredentials(cmd.Context(), merged, report.Config); err != nil {
 					return failureError{fmt.Errorf("credentials were not saved: %w", err)}
@@ -111,9 +148,11 @@ usually better passed per command with --app-id.`),
 				result.Validated = true
 			}
 
-			if err := config.Save(report.EnvFile, values); err != nil {
-				return failureError{err}
+			if err := s.writeLoginPayload(target, report, payload); err != nil {
+				return err
 			}
+			s.warnAboutLoginPrecedence(target, explicitKeychain, report)
+			result.Warnings = s.warnings
 			return s.renderLoginResult(result)
 		},
 	}
@@ -123,7 +162,140 @@ usually better passed per command with --app-id.`),
 	command.Flags().StringVar(&overrides.ClientSecret, "client-secret", "", "Azure AD client secret")
 	command.Flags().StringVar(&overrides.AppID, "app-id", "", "Microsoft Store product id (optional)")
 	command.Flags().BoolVar(&skipValidation, "skip-validation", false, "save without checking the credentials against the Store")
+	command.Flags().StringVar(&storage, "storage", "", "where to store credentials: keychain or file (default keychain, or file when --env-file or PCENTER_ENV_FILE is set)")
 	return command
+}
+
+// chooseLoginStorage applies the storage rule: the bypass means file, then an
+// explicit --storage, then file when the env file was named, then keychain.
+func (s *commandState) chooseLoginStorage(cmd *cobra.Command, storage string, report config.Report) (target string, explicitKeychain bool, err error) {
+	explicit := cmd.Flags().Changed("storage")
+	if explicit && storage != storageKeychain && storage != storageFile {
+		return "", false, usageError{fmt.Errorf("--storage must be keychain or file, not %q", storage)}
+	}
+	bypass := config.BypassKeychain(s.dependencies.Environment)
+	switch {
+	case bypass && explicit && storage == storageKeychain:
+		return "", false, usageError{fmt.Errorf("--storage keychain conflicts with %s; unset it or use --storage file", config.BypassKeychainEnv)}
+	case bypass:
+		target = storageFile
+	case explicit:
+		target = storage
+	case report.EnvFileExplicit:
+		target = storageFile
+	default:
+		target = storageKeychain
+	}
+	explicitKeychain = explicit && target == storageKeychain
+	if explicitKeychain && report.EnvFileExplicit && !report.EnvFileExists {
+		return "", false, usageError{fmt.Errorf(
+			"%s is named by --env-file or PCENTER_ENV_FILE but does not exist, so other commands would fail; unset it or use --storage file",
+			report.EnvFile)}
+	}
+	return target, explicitKeychain, nil
+}
+
+// refreshKeychainForLogin makes sure login knows what the keychain holds, even
+// when the environment set everything and Inspect skipped the lookup.
+func (s *commandState) refreshKeychainForLogin(report *config.Report) {
+	if config.BypassKeychain(s.dependencies.Environment) {
+		return
+	}
+	if s.dependencies.Keychain == nil {
+		report.KeychainState = config.KeychainUnavailable
+		report.KeychainError = "no system keychain"
+		return
+	}
+	if report.KeychainState != config.KeychainNotRead {
+		return
+	}
+	values, err := config.LoadKeychain(s.dependencies.Keychain)
+	var formatErr *config.KeychainFormatError
+	switch {
+	case errors.As(err, &formatErr):
+		report.KeychainState = config.KeychainInvalid
+		report.KeychainError = err.Error()
+	case err != nil:
+		report.KeychainState = config.KeychainUnavailable
+		report.KeychainError = err.Error()
+	case len(values) > 0:
+		report.KeychainHasAny = true
+	}
+}
+
+// loginPayload is what login writes: the new values plus every value kept from
+// a store, so the target store alone holds the account login validates.
+func loginPayload(report config.Report, values map[string]string, target string) (map[string]string, error) {
+	payload := map[string]string{}
+	for _, name := range config.AllNames {
+		switch {
+		case values[name] != "":
+			payload[name] = values[name]
+		case report.Sources[name] == config.SourceFile || report.Sources[name] == config.SourceKeychain:
+			payload[name] = report.Value(name)
+		}
+	}
+
+	if holdsAccountValue(payload) {
+		for _, name := range config.AccountNames {
+			if report.Sources[name] == config.SourceEnv && values[name] == "" {
+				return nil, fmt.Errorf("%s comes from the environment and would not be stored; pass it as a flag or unset it", name)
+			}
+		}
+	}
+
+	for _, name := range config.AllNames {
+		value := payload[name]
+		if strings.ContainsAny(value, "\r\n") {
+			return nil, fmt.Errorf("%s contains a line break, which cannot be stored", name)
+		}
+		if target == storageFile && value != "" &&
+			(value != strings.TrimSpace(value) || strings.HasPrefix(value, `"`) || strings.HasPrefix(value, "'")) {
+			return nil, fmt.Errorf("%s starts with a quote or has surrounding spaces, which the credentials file cannot store unchanged; use --storage keychain", name)
+		}
+	}
+	return payload, nil
+}
+
+// holdsAccountValue reports whether the payload sets any account credential.
+func holdsAccountValue(payload map[string]string) bool {
+	for _, name := range config.AccountNames {
+		if payload[name] != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *commandState) writeLoginPayload(target string, report config.Report, payload map[string]string) error {
+	if len(payload) == 0 {
+		return nil
+	}
+	if target == storageKeychain {
+		if err := config.SaveKeychain(s.dependencies.Keychain, payload); err != nil {
+			return failureError{fmt.Errorf("store credentials in the keychain: %w; %s", err, noKeychainRemedy)}
+		}
+		return nil
+	}
+	if err := config.Save(report.EnvFile, payload); err != nil {
+		return failureError{err}
+	}
+	return nil
+}
+
+func (s *commandState) warnAboutLoginPrecedence(target string, explicitKeychain bool, report config.Report) {
+	if explicitKeychain && report.EnvFileExplicit && report.EnvFileExists {
+		s.warn(fmt.Sprintf("%s is named by --env-file or PCENTER_ENV_FILE, so other commands read it before the keychain", report.EnvFile))
+	}
+	if target != storageFile || report.EnvFileExplicit {
+		return
+	}
+	switch {
+	case report.KeychainHasAny:
+		s.warn(fmt.Sprintf("the system keychain also holds credentials and takes precedence over %s; run \"pcenter auth login --storage keychain\" to update it instead", report.EnvFile))
+	case report.KeychainState == config.KeychainUnavailable && !config.BypassKeychain(s.dependencies.Environment):
+		s.warn(fmt.Sprintf("could not read the system keychain; if it holds credentials, they take precedence over %s", report.EnvFile))
+	}
 }
 
 func (s *commandState) authStatusCommand() *cobra.Command {
@@ -136,7 +308,7 @@ func (s *commandState) authStatusCommand() *cobra.Command {
 			if err := s.prepareOutput(); err != nil {
 				return err
 			}
-			report, err := config.Inspect(config.Overrides{EnvFile: s.envFile, AppID: s.appID}, s.dependencies.Environment)
+			report, err := config.Inspect(config.Overrides{EnvFile: s.envFile, AppID: s.appID}, s.dependencies.Environment, s.dependencies.Keychain)
 			if err != nil {
 				return usageError{err}
 			}
@@ -154,13 +326,7 @@ func (s *commandState) authStatusCommand() *cobra.Command {
 				}
 				return nil
 			}
-			if missing := report.Missing(config.AllNames); len(missing) > 0 {
-				return usageError{&config.MissingConfigError{
-					Missing:       missing,
-					EnvFile:       report.EnvFile,
-					EnvFileExists: report.EnvFileExists,
-				}}
-			}
+			s.inspected = &report
 			app, err := s.loadApplication(cmd.Context())
 			if err != nil {
 				return err
@@ -209,7 +375,7 @@ func (s *commandState) authDoctorCommand() *cobra.Command {
 			if err := s.prepareOutput(); err != nil {
 				return err
 			}
-			report, inspectErr := config.Inspect(config.Overrides{EnvFile: s.envFile, AppID: s.appID}, s.dependencies.Environment)
+			report, inspectErr := config.Inspect(config.Overrides{EnvFile: s.envFile, AppID: s.appID}, s.dependencies.Environment, s.dependencies.Keychain)
 			if inspectErr != nil {
 				// A malformed file is itself the diagnosis, so report it as a
 				// finding rather than failing before anything is printed.
@@ -219,10 +385,16 @@ func (s *commandState) authDoctorCommand() *cobra.Command {
 				}}, true)
 			}
 
-			checks := []authCheck{s.envFileCheck(report)}
+			s.inspected = &report
+			keychain, keychainFailed := keychainCheck(report)
+			checks := []authCheck{s.envFileCheck(report), keychain}
+			if shadow, ok := shadowedFileCheck(report); ok {
+				checks = append(checks, shadow)
+			}
 			for _, name := range config.AllNames {
 				checks = append(checks, credentialCheck(report, name))
 			}
+			setupFailed := keychainFailed || report.EnvFileError != ""
 
 			failed := report.Missing(config.AccountNames)
 			if len(failed) > 0 {
@@ -236,7 +408,7 @@ func (s *commandState) authDoctorCommand() *cobra.Command {
 			}
 
 			tokenCheck := authCheck{Check: "token", Status: "ok", Detail: "acquired from " + report.Config.LoginBase, Source: report.Config.LoginBase}
-			degraded := false
+			degraded := setupFailed
 			if err := s.verifyCredentials(cmd.Context(), credentialMap(report), report.Config); err != nil {
 				tokenCheck = authCheck{Check: "token", Status: "fail", Detail: err.Error(), Remedy: "pcenter auth login"}
 				degraded = true
@@ -268,7 +440,7 @@ func (s *commandState) authLogoutCommand() *cobra.Command {
 	var confirmed bool
 	command := &cobra.Command{
 		Use:   "logout",
-		Short: "Delete the credentials file",
+		Short: "Delete stored credentials from the keychain and the credentials file",
 		Args:  noArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if err := s.prepareOutput(); err != nil {
@@ -277,27 +449,71 @@ func (s *commandState) authLogoutCommand() *cobra.Command {
 			if !confirmed {
 				return usageError{errors.New("refusing to delete credentials without --yes")}
 			}
-			report, err := config.Inspect(config.Overrides{EnvFile: s.envFile}, s.dependencies.Environment)
-			if err != nil {
-				return usageError{err}
+			// Only the path is needed, so a malformed or unreadable file cannot
+			// stop logout from removing it and the keychain item.
+			envFile, fileErr := config.EnvFilePath(config.Overrides{EnvFile: s.envFile}, s.dependencies.Environment)
+			removed := false
+			if fileErr == nil {
+				removed, fileErr = removeCredentialsFile(envFile)
 			}
-			removed, err := config.Remove(report.EnvFile)
-			if err != nil {
-				return failureError{err}
+			keychainState, keychainErr := s.removeKeychainItem()
+
+			var failures []error
+			if fileErr != nil {
+				failures = append(failures, fmt.Errorf("remove %s: %w", envFile, fileErr))
 			}
+			if keychainErr != nil {
+				failures = append(failures, fmt.Errorf("remove keychain item: %w", keychainErr))
+			}
+			if len(failures) > 0 {
+				return failureError{errors.Join(failures...)}
+			}
+
 			renderer := output.NewRenderer(s.dependencies.Stdout, s.format)
-			state := "removed"
+			fileState := "removed"
 			if !removed {
-				state = "nothing to remove"
+				fileState = "nothing to remove"
 			}
 			if s.format == output.Table {
-				return wrapFailure(renderer.Rows([]string{"FILE", "RESULT"}, [][]string{{report.EnvFile, state}}))
+				return wrapFailure(renderer.Rows([]string{"LOCATION", "RESULT"}, [][]string{
+					{envFile, fileState},
+					{keychainLabel, keychainState},
+				}))
 			}
-			return wrapFailure(renderer.Value(map[string]any{"envFile": report.EnvFile, "removed": removed}))
+			return wrapFailure(renderer.Value(map[string]any{"envFile": envFile, "removed": removed, "keychain": keychainState}))
 		},
 	}
-	command.Flags().BoolVar(&confirmed, "yes", false, "confirm deleting the credentials file")
+	command.Flags().BoolVar(&confirmed, "yes", false, "confirm deleting stored credentials")
 	return command
+}
+
+// removeCredentialsFile deletes the credentials file but refuses a directory,
+// because os.Remove would delete an empty one.
+func removeCredentialsFile(path string) (bool, error) {
+	if info, err := os.Stat(path); err == nil && info.IsDir() {
+		return false, fmt.Errorf("%s is a directory, not a credentials file", path)
+	}
+	return config.Remove(path)
+}
+
+// removeKeychainItem deletes pcenter's keychain item. Any failure is an error,
+// whatever the keychain state, because a locked keychain can still hold
+// credentials that work again once it is unlocked.
+func (s *commandState) removeKeychainItem() (string, error) {
+	if config.BypassKeychain(s.dependencies.Environment) {
+		return "bypassed", nil
+	}
+	if s.dependencies.Keychain == nil {
+		return "unavailable", nil
+	}
+	deleted, err := config.DeleteKeychain(s.dependencies.Keychain)
+	if err != nil {
+		return "", fmt.Errorf("%w; unlock the keychain and run logout again, or set %s=1 where there is no keychain", err, config.BypassKeychainEnv)
+	}
+	if deleted {
+		return "removed", nil
+	}
+	return "nothing to remove", nil
 }
 
 // verifyCredentials proves credentials before they are written, so a typo is
@@ -323,6 +539,9 @@ func (s *commandState) verifyCredentials(ctx context.Context, values map[string]
 func (s *commandState) envFileCheck(report config.Report) authCheck {
 	check := authCheck{Check: "env file", Path: report.EnvFile}
 	switch {
+	case report.EnvFileError != "":
+		check.Status = "fail"
+		check.Detail = report.EnvFileError
 	case !report.EnvFileExists:
 		check.Status = "none"
 		check.Detail = report.EnvFile + " does not exist (fine if MS_STORE_* are set in the environment)"
@@ -338,6 +557,51 @@ func (s *commandState) envFileCheck(report config.Report) authCheck {
 		check.Detail = report.EnvFile
 	}
 	return check
+}
+
+// keychainCheck reports the keychain lookup. Only an invalid item fails the
+// setup: an unreadable keychain is fine when other sources supply everything.
+func keychainCheck(report config.Report) (authCheck, bool) {
+	check := authCheck{Check: "keychain", Detail: string(report.KeychainState)}
+	switch report.KeychainState {
+	case config.KeychainFound:
+		check.Status, check.Detail = "ok", keychainLabel
+	case config.KeychainEmpty:
+		check.Status, check.Detail, check.Remedy = "none", "no pcenter item in the "+keychainLabel, "pcenter auth login"
+	case config.KeychainNotRead:
+		check.Status, check.Detail = "skip", "not read: flags, environment and env file set everything"
+	case config.KeychainBypassed:
+		check.Status, check.Detail = "skip", config.BypassKeychainEnv+" is set"
+	case config.KeychainUnavailable:
+		check.Status, check.Detail = "warn", report.KeychainError
+	case config.KeychainInvalid:
+		check.Status, check.Detail, check.Remedy = "fail", report.KeychainError, "pcenter auth login --storage keychain"
+		return check, true
+	}
+	return check, false
+}
+
+// shadowedFileCheck warns when the keychain hides a default credentials file
+// that still holds an account, which the keychain silently overrides.
+func shadowedFileCheck(report config.Report) (authCheck, bool) {
+	if report.EnvFileExplicit || !report.KeychainHasAccount || !report.EnvFileHasAccount {
+		return authCheck{}, false
+	}
+	inKeychain := map[string]bool{}
+	for _, name := range report.KeychainNames {
+		inKeychain[name] = true
+	}
+	var onlyInFile []string
+	for _, name := range report.EnvFileNames {
+		if !inKeychain[name] {
+			onlyInFile = append(onlyInFile, name)
+		}
+	}
+	detail := fmt.Sprintf("the keychain holds credentials, so this run ignores %s; delete it only if no script names it with --env-file or PCENTER_ENV_FILE", report.EnvFile)
+	if len(onlyInFile) > 0 {
+		detail = fmt.Sprintf("the keychain overrides the account credentials in %s; keep the file, because only it sets %s", report.EnvFile, strings.Join(onlyInFile, ", "))
+	}
+	return authCheck{Check: "shadowed file", Status: "warn", Path: report.EnvFile, Detail: detail}, true
 }
 
 func credentialCheck(report config.Report, name string) authCheck {
@@ -437,12 +701,15 @@ func (s *commandState) renderLoginResult(result authLoginResult) error {
 	if result.Validated {
 		validated = "yes"
 	}
-	rows := [][]string{
-		{"file", result.EnvFile},
+	rows := [][]string{{"storage", result.Storage}}
+	if result.Storage == storageFile {
+		rows = append(rows, []string{"file", result.EnvFile})
+	}
+	rows = append(rows, [][]string{
 		{"stored", joinOrDash(result.Stored)},
 		{"kept", joinOrDash(result.Kept)},
 		{"validated", validated},
-	}
+	}...)
 	return wrapFailure(renderer.Rows([]string{"FIELD", "VALUE"}, rows))
 }
 
@@ -457,6 +724,10 @@ func (s *commandState) renderResolutionJSON(report config.Report, app *storetype
 		"envFile":       report.EnvFile,
 		"envFileExists": report.EnvFileExists,
 		"sources":       sources,
+		"keychain":      string(report.KeychainState),
+	}
+	if report.KeychainError != "" {
+		payload["keychainError"] = report.KeychainError
 	}
 	if app != nil {
 		payload["application"] = map[string]any{
@@ -480,6 +751,7 @@ func (s *commandState) renderResolution(report config.Report) error {
 		}
 		rows = append(rows, []string{name, source})
 	}
+	rows = append(rows, []string{"keychain", string(report.KeychainState)})
 	return wrapFailure(renderer.Rows([]string{"SETTING", "SOURCE"}, rows))
 }
 

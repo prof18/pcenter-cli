@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -21,7 +22,33 @@ const (
 	SourceFlag  Source = "flag"
 	SourceEnv   Source = "environment"
 	SourceFile  Source = "env-file"
+	// SourceKeychain is the system keychain. It ranks after an explicitly
+	// named env file and before the default one.
+	SourceKeychain Source = "keychain"
 )
+
+// KeychainState says what resolution learned about the system keychain.
+type KeychainState string
+
+// Keychain states, as reported by `auth status` and `auth doctor`.
+const (
+	// KeychainFound means the keychain item exists and holds values.
+	KeychainFound KeychainState = "found"
+	// KeychainEmpty means the keychain was read and holds no pcenter item.
+	KeychainEmpty KeychainState = "empty"
+	// KeychainNotRead means flags, environment and an explicit file already
+	// set everything, so the keychain was not consulted.
+	KeychainNotRead KeychainState = "not-read"
+	// KeychainBypassed means PCENTER_BYPASS_KEYCHAIN turned the keychain off.
+	KeychainBypassed KeychainState = "bypassed"
+	// KeychainUnavailable means the keychain could not be read.
+	KeychainUnavailable KeychainState = "unavailable"
+	// KeychainInvalid means the keychain item is not valid JSON.
+	KeychainInvalid KeychainState = "invalid"
+)
+
+// keychainLabel names the keychain item in messages.
+const keychainLabel = "system keychain (service " + KeychainService + ", account " + KeychainAccount + ")"
 
 // Credential variable names, in the order they are shown to a user.
 const (
@@ -53,8 +80,24 @@ type Report struct {
 	// PCENTER_ENV_FILE rather than the default location.
 	EnvFileExplicit bool
 	EnvFileMode     fs.FileMode
+	// EnvFileError is why a default env file that exists could not be read.
+	// An explicitly named file fails Inspect instead.
+	EnvFileError string
 	// Sources maps each MS_STORE_* name to where its value came from.
 	Sources map[string]Source
+	// EnvFileNames and KeychainNames list the names each store sets, in
+	// AllNames order, whichever source wins.
+	EnvFileNames  []string
+	KeychainNames []string
+	// KeychainState and KeychainError describe the keychain lookup.
+	KeychainState KeychainState
+	KeychainError string
+	// KeychainHasAny is true when the keychain item sets any of AllNames.
+	KeychainHasAny bool
+	// KeychainHasAccount and EnvFileHasAccount are true when that store alone
+	// sets all of AccountNames.
+	KeychainHasAccount bool
+	EnvFileHasAccount  bool
 }
 
 // Missing lists the given names that resolved to nothing, in AllNames order.
@@ -97,9 +140,11 @@ func (r Report) WorldReadable() bool {
 // looked and what to do about it. The bare list of variable names that
 // preceded it told a first-time user nothing actionable.
 type MissingConfigError struct {
-	Missing       []string
-	EnvFile       string
-	EnvFileExists bool
+	Missing         []string
+	EnvFile         string
+	EnvFileExists   bool
+	EnvFileExplicit bool
+	KeychainState   KeychainState
 }
 
 // EnvFileError is a credentials file named explicitly that could not be read.
@@ -141,6 +186,7 @@ func (e *MissingConfigError) ErrorDetails() map[string]any {
 		"missing":       e.Missing,
 		"envFile":       e.EnvFile,
 		"envFileExists": e.EnvFileExists,
+		"keychain":      string(e.KeychainState),
 		"remedy":        "pcenter auth login",
 	}
 }
@@ -153,10 +199,21 @@ func (e *MissingConfigError) Error() string {
 	if e.EnvFileExists {
 		state = "found, but does not set them"
 	}
+	keychain := string(e.KeychainState)
+	if keychain == "" {
+		keychain = string(KeychainUnavailable)
+	}
+	fileLine := fmt.Sprintf("%s (%s)", e.EnvFile, state)
+	keychainLine := fmt.Sprintf("%s (%s)", keychainLabel, keychain)
+	stores := []string{fileLine, keychainLine}
+	if !e.EnvFileExplicit {
+		stores = []string{keychainLine, fileLine}
+	}
 	fmt.Fprintf(&b, "\n\nchecked, in order:")
 	fmt.Fprintf(&b, "\n  1. command-line flags")
 	fmt.Fprintf(&b, "\n  2. MS_STORE_* environment variables")
-	fmt.Fprintf(&b, "\n  3. %s (%s)", e.EnvFile, state)
+	fmt.Fprintf(&b, "\n  3. %s", stores[0])
+	fmt.Fprintf(&b, "\n  4. %s", stores[1])
 	fmt.Fprintf(&b, "\n\nrun \"pcenter auth login\" to store credentials, or set the variables in the environment")
 	return b.String()
 }
@@ -170,48 +227,79 @@ func (e *MissingConfigError) Error() string {
 // the file it is about to create, and `auth doctor` has to be able to say the
 // file is absent. Resolve reapplies the stricter rule for operational commands.
 // A malformed file is still an error — that is a real problem at any callsite.
-func Inspect(overrides Overrides, environment Environment) (Report, error) {
+func Inspect(overrides Overrides, environment Environment, keychain Keychain) (Report, error) {
 	envFile, explicit, err := envFilePath(overrides, environment)
 	if err != nil {
 		return Report{}, err
 	}
 
-	fileValues, err := parseEnvFile(envFile)
-	exists := true
-	if err != nil {
-		if !os.IsNotExist(underlying(err)) {
-			return Report{}, err
-		}
-		fileValues = Environment{}
-		exists = false
-	}
-
-	var mode fs.FileMode
-	if exists {
-		if info, statErr := os.Stat(envFile); statErr == nil {
-			mode = info.Mode()
-		}
-	}
-
 	report := Report{
 		EnvFile:         envFile,
-		EnvFileExists:   exists,
 		EnvFileExplicit: explicit,
-		EnvFileMode:     mode,
 		Sources:         make(map[string]Source, len(AllNames)),
 	}
+
+	fileValues, err := parseEnvFile(envFile)
+	report.EnvFileExists = true
+	if err != nil {
+		switch {
+		case os.IsNotExist(underlying(err)):
+			report.EnvFileExists = false
+		case explicit:
+			return Report{}, err
+		default:
+			// A broken default file must not hide credentials the keychain
+			// holds; ValidateReport surfaces it if anything is still missing.
+			report.EnvFileError = err.Error()
+		}
+		fileValues = Environment{}
+	}
+	if report.EnvFileExists {
+		if info, statErr := os.Stat(envFile); statErr == nil {
+			report.EnvFileMode = info.Mode()
+		}
+	}
+
 	flagValues := map[string]string{
 		TenantIDName:     overrides.TenantID,
 		ClientIDName:     overrides.ClientID,
 		ClientSecretName: overrides.ClientSecret,
 		AppIDName:        overrides.AppID,
 	}
+
+	keychainValues := inspectKeychain(&report, keychain, environment, func(name string) bool {
+		if flagValues[name] != "" || environment[name] != "" {
+			return true
+		}
+		return explicit && fileValues[name] != ""
+	})
+
 	resolved := make(map[string]string, len(AllNames))
 	for _, name := range AllNames {
-		value, source := pick(flagValues[name], environment[name], fileValues[name])
+		candidates := []candidate{
+			{flagValues[name], SourceFlag},
+			{environment[name], SourceEnv},
+		}
+		file := candidate{fileValues[name], SourceFile}
+		stored := candidate{keychainValues[name], SourceKeychain}
+		if explicit {
+			candidates = append(candidates, file, stored)
+		} else {
+			candidates = append(candidates, stored, file)
+		}
+		value, source := pick(candidates...)
 		resolved[name] = value
 		report.Sources[name] = source
+		if fileValues[name] != "" {
+			report.EnvFileNames = append(report.EnvFileNames, name)
+		}
+		if keychainValues[name] != "" {
+			report.KeychainNames = append(report.KeychainNames, name)
+		}
 	}
+	report.KeychainHasAny = len(report.KeychainNames) > 0
+	report.KeychainHasAccount = setsAll(keychainValues, AccountNames)
+	report.EnvFileHasAccount = setsAll(fileValues, AccountNames)
 
 	report.Config = Config{
 		TenantID:     resolved[TenantIDName],
@@ -223,6 +311,59 @@ func Inspect(overrides Overrides, environment Environment) (Report, error) {
 		LoginBase:    firstNonEmpty(environment["PCENTER_LOGIN_BASE"], defaultLoginBase),
 	}
 	return report, nil
+}
+
+// inspectKeychain records the keychain state on the report and returns the
+// values to use. setEarlier reports whether a higher-ranked source already
+// sets a name; when every name is set, the keychain is not read at all, so a
+// CI job with every variable set never touches one.
+func inspectKeychain(report *Report, keychain Keychain, environment Environment, setEarlier func(string) bool) map[string]string {
+	if BypassKeychain(environment) {
+		report.KeychainState = KeychainBypassed
+		return nil
+	}
+	everything := true
+	for _, name := range AllNames {
+		if !setEarlier(name) {
+			everything = false
+			break
+		}
+	}
+	if everything {
+		report.KeychainState = KeychainNotRead
+		return nil
+	}
+	if keychain == nil {
+		report.KeychainState = KeychainUnavailable
+		report.KeychainError = "no system keychain"
+		return nil
+	}
+	values, err := LoadKeychain(keychain)
+	var formatErr *KeychainFormatError
+	switch {
+	case errors.As(err, &formatErr):
+		report.KeychainState = KeychainInvalid
+		report.KeychainError = err.Error()
+		return nil
+	case err != nil:
+		report.KeychainState = KeychainUnavailable
+		report.KeychainError = err.Error()
+		return nil
+	case len(values) == 0:
+		report.KeychainState = KeychainEmpty
+	default:
+		report.KeychainState = KeychainFound
+	}
+	return values
+}
+
+func setsAll(values map[string]string, names []string) bool {
+	for _, name := range names {
+		if values[name] == "" {
+			return false
+		}
+	}
+	return true
 }
 
 // Save merges values into the env file, creating it with owner-only
@@ -309,6 +450,13 @@ func DefaultEnvFile() (string, error) {
 	return filepath.Join(home, ".config", "pcenter", "credentials.env"), nil
 }
 
+// EnvFilePath returns the credentials file path without reading the file, for
+// commands such as `auth logout` that must work when the file is unreadable.
+func EnvFilePath(overrides Overrides, environment Environment) (string, error) {
+	path, _, err := envFilePath(overrides, environment)
+	return path, err
+}
+
 func envFilePath(overrides Overrides, environment Environment) (path string, explicit bool, err error) {
 	defaultPath, err := DefaultEnvFile()
 	if err != nil {
@@ -341,14 +489,17 @@ func expandHome(path string) (string, error) {
 	return filepath.Join(home, path[2:]), nil
 }
 
-func pick(flagValue, envValue, fileValue string) (string, Source) {
-	switch {
-	case flagValue != "":
-		return flagValue, SourceFlag
-	case envValue != "":
-		return envValue, SourceEnv
-	case fileValue != "":
-		return fileValue, SourceFile
+type candidate struct {
+	value  string
+	source Source
+}
+
+// pick returns the first non-empty candidate, in precedence order.
+func pick(candidates ...candidate) (string, Source) {
+	for _, c := range candidates {
+		if c.value != "" {
+			return c.value, c.source
+		}
 	}
 	return "", SourceUnset
 }

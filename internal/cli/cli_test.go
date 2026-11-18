@@ -129,6 +129,14 @@ func TestUsageErrorsExitTwoAsJSON(t *testing.T) {
 
 func execute(t *testing.T, environment config.Environment, args []string, build cli.BuildInfo) (string, string, int) {
 	t.Helper()
+	return executeWithKeychain(t, config.NewMemoryKeychain(), environment, args, build)
+}
+
+// executeWithKeychain is execute with a chosen keychain. Tests never use the
+// real system keychain, for the same reason hermetic keeps them off the real
+// credentials file.
+func executeWithKeychain(t *testing.T, keychain config.Keychain, environment config.Environment, args []string, build cli.BuildInfo) (string, string, int) {
+	t.Helper()
 	environment = hermetic(t, environment)
 	var stdout, stderr bytes.Buffer
 	exitCode := cli.Execute(context.Background(), args, cli.Dependencies{
@@ -140,6 +148,7 @@ func execute(t *testing.T, environment config.Environment, args []string, build 
 		Build:       build,
 		Clock:       instantClock{},
 		Rand:        cliFixedRand(1),
+		Keychain:    keychain,
 	})
 	return stdout.String(), stderr.String(), exitCode
 }

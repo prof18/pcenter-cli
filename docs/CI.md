@@ -15,6 +15,8 @@ This page covers installing pcenter on a runner, providing credentials, and auto
 
 Set the four `MS_STORE_*` variables from your repository secrets. They take precedence over the credentials file and leave nothing on the runner to clean up — do **not** run `pcenter auth login` in CI.
 
+With all four variables set, operational commands such as `auth doctor` and `publish msix` do not read the system keychain, but `auth login` and `auth logout` still do. `PCENTER_BYPASS_KEYCHAIN=1` turns the keychain off for every command.
+
 ```yaml
 env:
   MS_STORE_TENANT_ID: ${{ secrets.MS_STORE_TENANT_ID }}

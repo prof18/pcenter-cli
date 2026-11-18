@@ -56,7 +56,7 @@ With JSON output, a failure writes **one JSON object to stderr** and nothing to 
 | `code` | Exit | Meaning |
 | --- | --- | --- |
 | `usage` | 2 | Invalid flags or argument values. |
-| `missing_configuration` | 2 | Credentials could not be resolved. The payload names which. |
+| `missing_configuration` | 2 | Credentials could not be resolved. The payload names which, and `keychain` gives the keychain state. |
 | `env_file` | 2 | A credentials file was named explicitly but is absent or unreadable. |
 | `validation` | 2 | Input rejected before any request was sent. |
 | `auth_failed` | 3 | The Store rejected the credentials. |
@@ -79,10 +79,10 @@ Booleans and numbers stay typed. `submission get` and `reviews list` return the 
 | Command | Shape |
 | --- | --- |
 | `version` | `{version, commit, buildDate}` |
-| `auth login` | `{envFile, stored[], kept[], validated}` |
-| `auth status` | `{envFile, envFileExists, sources{MS_STORE_*: "flag"\|"environment"\|"env-file"\|""}, application?}` |
+| `auth login` | `{envFile, storage: "keychain"\|"file", stored[], kept[], validated, warnings?}` |
+| `auth status` | `{envFile, envFileExists, sources{MS_STORE_*: "flag"\|"environment"\|"env-file"\|"keychain"\|""}, keychain: "found"\|"empty"\|"not-read"\|"bypassed"\|"unavailable"\|"invalid", keychainError?, application?}` |
 | `auth doctor` | `{ok, checks[{check, status, detail, source?, value?, path?, mode?, remedy?}]}` |
-| `auth logout` | `{envFile, removed}` |
+| `auth logout` | `{envFile, removed, keychain: "removed"\|"nothing to remove"\|"bypassed"\|"unavailable"}` |
 | `app info` | The application resource: `{id, primaryName, packageFamilyName, packageIdentityName, publisherName, firstPublishedDate, hasAdvancedListingPermission, lastPublishedApplicationSubmission, pendingApplicationSubmission}` |
 | `locales list` | `["en-us", "it", …]` — a bare string array |
 | `reviews list` | The API's review objects, unmodified |
@@ -118,7 +118,11 @@ Resolution order, first hit wins:
 
 1. Flags (`--app-id`, and on `auth login` the credential flags)
 2. `MS_STORE_*` environment variables
-3. The credentials file
+3. A credentials file named with `--env-file` or `PCENTER_ENV_FILE`
+4. The system keychain (service `pcenter`, account `default`)
+5. The default credentials file, `~/.config/pcenter/credentials.env`
+
+When flags, environment variables and a named file already set all four values, pcenter does not read the keychain.
 
 | Variable | Meaning |
 | --- | --- |
@@ -127,10 +131,11 @@ Resolution order, first hit wins:
 | `MS_STORE_CLIENT_SECRET` | Azure AD client secret |
 | `MS_STORE_APP_ID` | Microsoft Store product id |
 | `PCENTER_ENV_FILE` | Credentials file path; default `~/.config/pcenter/credentials.env` (a leading `~` is expanded) |
+| `PCENTER_BYPASS_KEYCHAIN` | `1`, `true`, `yes` or `on` turns the system keychain off for every command; `auth login` then writes the file |
 
-In CI, use the environment variables from your secrets: they take precedence over the file and leave nothing on the runner to clean up.
+In CI, use the environment variables from your secrets: they take precedence over stored credentials and leave nothing on the runner to clean up.
 
-A missing credential tells you where `pcenter` looked and what to run. It never prompts, with a single exception: `auth login` prompts when — and only when — stdin is a terminal, so it cannot hang an unattended job.
+A missing credential tells you where `pcenter` looked and what to run. pcenter itself never prompts, with a single exception: `auth login` prompts when — and only when — stdin is a terminal, so it cannot hang an unattended job. Reading the system keychain can still make the operating system show an unlock prompt, so unattended runs set all four `MS_STORE_*` variables or `PCENTER_BYPASS_KEYCHAIN=1`. All four variables avoid the keychain only for operational commands: `auth login` and `auth logout` always use the keychain unless `PCENTER_BYPASS_KEYCHAIN=1` is set.
 
 ---
 

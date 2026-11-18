@@ -46,7 +46,7 @@ You need these values:
 The first three authenticate the application. The product ID selects the Store app; you can provide it during login or later with `--app-id`.
 
 ```bash
-# 1. Store your credentials (prompts only when you're at a terminal)
+# 1. Store your credentials in the system keychain (prompts only at a terminal)
 pcenter auth login
 
 # 2. Check your setup
@@ -59,9 +59,11 @@ pcenter listing show --locale en-us
 pcenter submission status
 ```
 
-For non-interactive setup, pass `--tenant-id`, `--client-id`, `--client-secret`, and optionally `--app-id` to `pcenter auth login`. See `pcenter auth login --help` for details.
+`auth login` stores credentials in the system keychain: macOS Keychain, Windows Credential Manager, or Secret Service on Linux. Pass `--storage file` to write `~/.config/pcenter/credentials.env` instead, or name another file with `--env-file` or `PCENTER_ENV_FILE`.
 
-In CI, skip `auth login` and set `MS_STORE_TENANT_ID`, `MS_STORE_CLIENT_ID`, `MS_STORE_CLIENT_SECRET` and `MS_STORE_APP_ID` from your secrets — they take precedence over the credentials file and leave nothing on the runner.
+For non-interactive setup, pass `--tenant-id`, `--client-id`, `--client-secret`, and optionally `--app-id` to `pcenter auth login`. That stops pcenter prompting, but reading the keychain can still make the system show an unlock prompt, so an unattended login also sets `PCENTER_BYPASS_KEYCHAIN=1` and writes the file. See `pcenter auth login --help` for details.
+
+In CI, skip `auth login` and set `MS_STORE_TENANT_ID`, `MS_STORE_CLIENT_ID`, `MS_STORE_CLIENT_SECRET` and `MS_STORE_APP_ID` from your secrets — they take precedence over stored credentials and leave nothing on the runner.
 
 ---
 
@@ -141,7 +143,7 @@ If you need one of these often, please open an issue.
 - **Exit codes:** `2` configuration problem, `3` rejected credentials, `4` invalid current state (do not retry), `5` throttled (retry later).
 - **Changes are verified.** The Store API can return a 504 after an operation succeeds, so pcenter checks the resulting state instead of trusting the response alone.
 - **Secrets are redacted** from verbose output, including client secrets, bearer tokens, and upload URL signatures.
-- **No prompts** except `auth login`, and then only at a terminal. Destructive operations need an explicit flag.
+- **No prompts** from pcenter except `auth login`, and then only at a terminal. Reading the keychain can make the system show an unlock prompt, so unattended runs set all four `MS_STORE_*` variables or `PCENTER_BYPASS_KEYCHAIN=1`. Destructive operations need an explicit flag.
 
 For JSON shapes, exit codes, and safe automation rules, see [docs/AUTOMATION.md](docs/AUTOMATION.md).
 
