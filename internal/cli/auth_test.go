@@ -1188,3 +1188,17 @@ func TestAuthLoginCreatesAMissingNamedFile(t *testing.T) {
 		t.Fatalf("environment values must not be written: %s", contents)
 	}
 }
+
+func TestAuthLoginLeavesAnExistingFileAloneWithNothingToStore(t *testing.T) {
+	t.Parallel()
+	server := fullServer(t)
+	envFile := seededEnvFile(t, "# hand-written\n")
+	_, stderr, exitCode := executeWithKeychain(t, config.NewMemoryKeychain(), fakeEnvironment(server),
+		[]string{"--output", "json", "--env-file", envFile, "auth", "login", "--skip-validation"}, cli.BuildInfo{})
+	if exitCode != output.ExitSuccess {
+		t.Fatalf("exit = %d stderr = %q", exitCode, stderr)
+	}
+	if contents, err := os.ReadFile(envFile); err != nil || string(contents) != "# hand-written\n" {
+		t.Fatalf("file rewritten: %q (%v)", contents, err)
+	}
+}

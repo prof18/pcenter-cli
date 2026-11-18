@@ -278,8 +278,12 @@ func (s *commandState) writeLoginPayload(target string, report config.Report, pa
 		}
 		return nil
 	}
-	// Saved even when empty, so a file named with --env-file exists afterwards
-	// and later commands that name it do not fail on a missing file.
+	// An empty payload still creates a missing file, so a file named with
+	// --env-file exists afterwards and later commands that name it do not fail;
+	// an existing file is left untouched.
+	if len(payload) == 0 && report.EnvFileExists {
+		return nil
+	}
 	if err := config.Save(report.EnvFile, payload); err != nil {
 		return failureError{err}
 	}
