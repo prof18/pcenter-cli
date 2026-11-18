@@ -143,7 +143,7 @@ If you need one of these often, please open an issue.
 - **Exit codes:** `2` configuration problem, `3` rejected credentials, `4` invalid current state (do not retry), `5` throttled (retry later).
 - **Changes are verified.** The Store API can return a 504 after an operation succeeds, so pcenter checks the resulting state instead of trusting the response alone.
 - **Secrets are redacted** from verbose output, including client secrets, bearer tokens, and upload URL signatures.
-- **No prompts** from pcenter except `auth login`, and then only at a terminal. Reading the keychain can make the system show an unlock prompt, so unattended runs set all four `MS_STORE_*` variables or `PCENTER_BYPASS_KEYCHAIN=1`. Destructive operations need an explicit flag.
+- **No prompts** from pcenter except `auth login`, and then only at a terminal. Reading the keychain can make the system show an unlock prompt, so unattended operational commands set all four `MS_STORE_*` variables or `PCENTER_BYPASS_KEYCHAIN=1`; `auth login` and `auth logout` read the keychain unless `PCENTER_BYPASS_KEYCHAIN=1` is set. Destructive operations need an explicit flag.
 
 For JSON shapes, exit codes, and safe automation rules, see [docs/AUTOMATION.md](docs/AUTOMATION.md).
 

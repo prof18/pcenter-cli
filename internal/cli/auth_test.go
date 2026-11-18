@@ -1139,3 +1139,34 @@ func decodeDoctor(t *testing.T, stdout string) doctorReport {
 	}
 	return report
 }
+
+func TestAuthDoctorFailsOnAMissingExplicitFile(t *testing.T) {
+	t.Parallel()
+	server := fullServer(t)
+	keychain := seedKeychain(t, accountValues)
+	absent := filepath.Join(t.TempDir(), "absent.env")
+	stdout, _, exitCode := executeWithKeychain(t, keychain, serverEnvironment(server),
+		[]string{"--output", "json", "--env-file", absent, "auth", "doctor"}, cli.BuildInfo{})
+	report := decodeDoctor(t, stdout)
+	if exitCode == output.ExitSuccess || report.OK || report.status("env file") != "fail" {
+		t.Fatalf("exit = %d doctor = %s", exitCode, stdout)
+	}
+}
+
+func TestAuthStatusOfflineShowsAMalformedDefaultFile(t *testing.T) {
+	defaultFile := useTempHome(t)
+	if err := os.MkdirAll(filepath.Dir(defaultFile), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(defaultFile, []byte("not an env line\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, _ := executeInHome(t, config.NewMemoryKeychain(), config.Environment{}, "--output", "json", "auth", "status", "--offline")
+	if !strings.Contains(stdout, `"envFileError"`) {
+		t.Fatalf("offline status should report the file error: stdout = %s stderr = %q", stdout, stderr)
+	}
+	tableOut, _, _ := executeInHome(t, config.NewMemoryKeychain(), config.Environment{}, "--output", "table", "auth", "status", "--offline")
+	if !strings.Contains(tableOut, "expected KEY=VALUE") {
+		t.Fatalf("table status should show the file error: %s", tableOut)
+	}
+}

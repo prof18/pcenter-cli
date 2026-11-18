@@ -41,7 +41,7 @@ pcenter auth login [--tenant-id <id>] [--client-id <id>] [--client-secret <secre
                    [--app-id <product-id>] [--skip-validation] [--storage keychain|file]
 ```
 
-Stores credentials so other commands can find them: in the system keychain (service `pcenter`, account `default`) by default, or in the credentials file (`0600`, inside a `0700` directory) with `--storage file`, when `--env-file` or `PCENTER_ENV_FILE` names a file, or when `PCENTER_BYPASS_KEYCHAIN=1` is set. Login never falls back from the keychain to the file: if the keychain cannot be read or written, it fails and says to rerun with `--storage file`.
+Stores credentials so other commands can find them: in the system keychain (service `pcenter`, account `default`) by default, or in the credentials file (`0600`, inside a `0700` directory) with `--storage file`, when `--env-file` or `PCENTER_ENV_FILE` names a file and `--storage` is not given, or when `PCENTER_BYPASS_KEYCHAIN=1` is set (which conflicts with `--storage keychain`). Login never falls back from the keychain to the file: if the keychain cannot be read or written, it fails and says to rerun with `--storage file`.
 
 - Values come from flags. Anything missing is **prompted for only when stdin is a terminal**; without one the command exits with a message naming the flag to pass, so it can never hang a script or a CI job. The client secret is read without echo. Passing every value as a flag stops pcenter prompting, but reading the keychain can still make the system show an unlock prompt; an unattended login sets `PCENTER_BYPASS_KEYCHAIN=1` and writes the file.
 - Credentials are **verified against the Store before they are stored** — a mistyped secret fails here rather than halfway through a release. `--skip-validation` opts out.
@@ -62,7 +62,7 @@ The whole setup checked at once, reported in full rather than stopping at the fi
 
 | Check | What it covers |
 | --- | --- |
-| `env file` | Whether the file exists, its path, and its permission mode — it holds a client secret. Fails when the file cannot be parsed. |
+| `env file` | Whether the file exists, its path, and its permission mode — it holds a client secret. Fails when the file cannot be parsed, or when a file named with `--env-file` or `PCENTER_ENV_FILE` does not exist. |
 | `keychain` | Whether the system keychain holds pcenter's item. A keychain that cannot be read is a warning; an item that is not valid JSON fails. |
 | `shadowed file` | A warning when the keychain overrides credentials still in the default file, and whether the file still supplies anything. |
 | `MS_STORE_TENANT_ID` … `MS_STORE_APP_ID` | One check per setting: whether it is set and which source won. |

@@ -69,9 +69,10 @@ your secrets: they need no login on the runner and take precedence over
 stored credentials.
 
 Credentials go to the system keychain (service pcenter, account default). They
-go to ~/.config/pcenter/credentials.env instead, written readable only by you,
-with --storage file, when --env-file or PCENTER_ENV_FILE names a file, or when
-PCENTER_BYPASS_KEYCHAIN=1 is set. Login never falls back from the keychain to
+go to ~/.config/pcenter/credentials.env instead, or to the file --env-file or
+PCENTER_ENV_FILE names, written readable only by you, with --storage file, when
+a file is named and --storage is not given, or when PCENTER_BYPASS_KEYCHAIN=1
+is set (which conflicts with --storage keychain). Login never falls back from the keychain to
 the file: if the keychain cannot be used, it fails and says so. Stored values
 are kept unless a flag replaces them.
 
@@ -394,7 +395,7 @@ func (s *commandState) authDoctorCommand() *cobra.Command {
 			for _, name := range config.AllNames {
 				checks = append(checks, credentialCheck(report, name))
 			}
-			setupFailed := keychainFailed || report.EnvFileError != ""
+			setupFailed := keychainFailed || report.EnvFileError != "" || (report.EnvFileExplicit && !report.EnvFileExists)
 
 			failed := report.Missing(config.AccountNames)
 			if len(failed) > 0 {
@@ -542,6 +543,12 @@ func (s *commandState) envFileCheck(report config.Report) authCheck {
 	case report.EnvFileError != "":
 		check.Status = "fail"
 		check.Detail = report.EnvFileError
+	case !report.EnvFileExists && report.EnvFileExplicit:
+		// Operational commands refuse a named file that is missing, so the
+		// setup is unusable even when the keychain supplies everything.
+		check.Status = "fail"
+		check.Detail = report.EnvFile + " is named by --env-file or PCENTER_ENV_FILE but does not exist"
+		check.Remedy = "pcenter auth login --env-file " + report.EnvFile
 	case !report.EnvFileExists:
 		check.Status = "none"
 		check.Detail = report.EnvFile + " does not exist (fine if MS_STORE_* are set in the environment)"
@@ -729,6 +736,9 @@ func (s *commandState) renderResolutionJSON(report config.Report, app *storetype
 	if report.KeychainError != "" {
 		payload["keychainError"] = report.KeychainError
 	}
+	if report.EnvFileError != "" {
+		payload["envFileError"] = report.EnvFileError
+	}
 	if app != nil {
 		payload["application"] = map[string]any{
 			"id":        app.ID,
@@ -752,6 +762,9 @@ func (s *commandState) renderResolution(report config.Report) error {
 		rows = append(rows, []string{name, source})
 	}
 	rows = append(rows, []string{"keychain", string(report.KeychainState)})
+	if report.EnvFileError != "" {
+		rows = append(rows, []string{"env file", report.EnvFileError})
+	}
 	return wrapFailure(renderer.Rows([]string{"SETTING", "SOURCE"}, rows))
 }
 

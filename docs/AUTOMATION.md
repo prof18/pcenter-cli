@@ -80,7 +80,7 @@ Booleans and numbers stay typed. `submission get` and `reviews list` return the 
 | --- | --- |
 | `version` | `{version, commit, buildDate}` |
 | `auth login` | `{envFile, storage: "keychain"\|"file", stored[], kept[], validated, warnings?}` |
-| `auth status` | `{envFile, envFileExists, sources{MS_STORE_*: "flag"\|"environment"\|"env-file"\|"keychain"\|""}, keychain: "found"\|"empty"\|"not-read"\|"bypassed"\|"unavailable"\|"invalid", keychainError?, application?}` |
+| `auth status` | `{envFile, envFileExists, sources{MS_STORE_*: "flag"\|"environment"\|"env-file"\|"keychain"\|""}, keychain: "found"\|"empty"\|"not-read"\|"bypassed"\|"unavailable"\|"invalid", keychainError?, envFileError?, application?}` |
 | `auth doctor` | `{ok, checks[{check, status, detail, source?, value?, path?, mode?, remedy?}]}` |
 | `auth logout` | `{envFile, removed, keychain: "removed"\|"nothing to remove"\|"bypassed"\|"unavailable"}` |
 | `app info` | The application resource: `{id, primaryName, packageFamilyName, packageIdentityName, publisherName, firstPublishedDate, hasAdvancedListingPermission, lastPublishedApplicationSubmission, pendingApplicationSubmission}` |
