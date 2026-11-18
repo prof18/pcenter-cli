@@ -65,6 +65,20 @@ func TestLoadKeychainRejectsMalformedItems(t *testing.T) {
 	}
 }
 
+func TestKeychainFormatErrorNeverEchoesTheItem(t *testing.T) {
+	t.Parallel()
+	for _, item := range []string{`{"clientSecret":123456789e999}`, `{"clientSecret":"hunter2"`, `{"clientSecret":hunter2}`} {
+		keychain := config.NewMemoryKeychain()
+		if err := keychain.Set(config.KeychainService, config.KeychainAccount, item); err != nil {
+			t.Fatal(err)
+		}
+		_, err := config.LoadKeychain(keychain)
+		if err == nil || strings.Contains(err.Error(), "123456789") || strings.Contains(err.Error(), "hunter2") {
+			t.Fatalf("item %q: error %v echoes the item", item, err)
+		}
+	}
+}
+
 func TestSaveKeychainReplacesAMalformedItem(t *testing.T) {
 	t.Parallel()
 	keychain := config.NewMemoryKeychain()

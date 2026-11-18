@@ -28,7 +28,7 @@ Output is a table at a terminal and JSON when piped. For the full automation con
 | `--verbose` | Log HTTP requests and response bodies to stderr, with secrets redacted. Safe to paste into an issue. |
 | `--version` / `-v` | Print version, commit and build date. Same as `pcenter version`. |
 
-Credentials resolve in this order, first hit wins: **flags → `MS_STORE_*` environment variables → a credentials file named with `--env-file` or `PCENTER_ENV_FILE` → system keychain → the default credentials file**. See [Authentication](#auth).
+Credentials resolve in this order, first hit wins: **flags → `MS_STORE_*` environment variables → a credentials file named with `--env-file` or `PCENTER_ENV_FILE` → system keychain → the default credentials file**. Naming a file replaces the default one rather than adding to it, so only one file is ever read. See [Authentication](#auth).
 
 ---
 

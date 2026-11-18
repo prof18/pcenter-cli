@@ -75,7 +75,7 @@ func loadKeychainItem(k Keychain) (values map[string]string, found bool, err err
 	}
 	var decoded map[string]any
 	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
-		return nil, true, &KeychainFormatError{Err: err}
+		return nil, true, &KeychainFormatError{Err: safeDecodeError(err)}
 	}
 	if decoded == nil {
 		return nil, true, &KeychainFormatError{Err: errors.New("item is null")}
@@ -166,6 +166,23 @@ func BypassKeychain(environment Environment) bool {
 		return true
 	}
 	return false
+}
+
+// safeDecodeError describes a JSON decode failure without quoting the item:
+// encoding/json errors can echo raw tokens, and the item holds a secret.
+func safeDecodeError(err error) error {
+	var syntaxErr *json.SyntaxError
+	var typeErr *json.UnmarshalTypeError
+	switch {
+	case errors.As(err, &syntaxErr):
+		return fmt.Errorf("invalid JSON at byte %d", syntaxErr.Offset)
+	case errors.As(err, &typeErr):
+		if typeErr.Field != "" {
+			return fmt.Errorf("field %s has the wrong type", typeErr.Field)
+		}
+		return fmt.Errorf("value at byte %d has the wrong type", typeErr.Offset)
+	}
+	return errors.New("invalid JSON")
 }
 
 func sameValues(a, b map[string]string) bool {

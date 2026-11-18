@@ -248,16 +248,15 @@ func TestInspectKeychainBeatsTheDefaultFile(t *testing.T) {
 
 func TestInspectSkipsTheKeychainWhenEverythingIsSet(t *testing.T) {
 	t.Parallel()
-	keychain := config.NewMemoryKeychain()
-	keychain.Err = errors.New("must not be read")
+	keychain := &countingKeychain{MemoryKeychain: config.NewMemoryKeychain()}
 	report, err := config.Inspect(config.Overrides{EnvFile: filepath.Join(t.TempDir(), "absent.env")}, config.Environment{
 		"MS_STORE_TENANT_ID": "t", "MS_STORE_CLIENT_ID": "c", "MS_STORE_CLIENT_SECRET": "s", "MS_STORE_APP_ID": "a",
 	}, keychain)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.KeychainState != config.KeychainNotRead {
-		t.Fatalf("state = %q, want not-read", report.KeychainState)
+	if report.KeychainState != config.KeychainNotRead || keychain.gets != 0 {
+		t.Fatalf("state = %q after %d reads, want not-read and no reads", report.KeychainState, keychain.gets)
 	}
 }
 
@@ -276,16 +275,17 @@ func TestInspectToleratesAnUnavailableKeychain(t *testing.T) {
 
 func TestInspectBypassSkipsTheKeychain(t *testing.T) {
 	t.Parallel()
+	keychain := &countingKeychain{MemoryKeychain: seededKeychain(t, allKeychainValues())}
 	report, err := config.Inspect(
 		config.Overrides{EnvFile: filepath.Join(t.TempDir(), "absent.env")},
 		config.Environment{config.BypassKeychainEnv: "1"},
-		seededKeychain(t, allKeychainValues()),
+		keychain,
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.KeychainState != config.KeychainBypassed || report.Sources[config.TenantIDName] != config.SourceUnset {
-		t.Fatalf("state = %q tenant source = %q", report.KeychainState, report.Sources[config.TenantIDName])
+	if report.KeychainState != config.KeychainBypassed || report.Sources[config.TenantIDName] != config.SourceUnset || keychain.gets != 0 {
+		t.Fatalf("state = %q tenant source = %q reads = %d", report.KeychainState, report.Sources[config.TenantIDName], keychain.gets)
 	}
 }
 
@@ -340,4 +340,16 @@ func TestInspectIgnoresAMalformedKeychainItem(t *testing.T) {
 			t.Fatalf("%s should not come from an invalid item", name)
 		}
 	}
+}
+
+// countingKeychain counts reads so a test can prove the keychain was skipped.
+// Tests using it are sequential within themselves, so no lock is needed.
+type countingKeychain struct {
+	*config.MemoryKeychain
+	gets int
+}
+
+func (c *countingKeychain) Get(service, account string) (string, error) {
+	c.gets++
+	return c.MemoryKeychain.Get(service, account)
 }

@@ -122,7 +122,7 @@ Resolution order, first hit wins:
 4. The system keychain (service `pcenter`, account `default`)
 5. The default credentials file, `~/.config/pcenter/credentials.env`
 
-When flags, environment variables and a named file already set all four values, pcenter does not read the keychain.
+Only one file is read: naming one with `--env-file` or `PCENTER_ENV_FILE` replaces the default file, so steps 3 and 5 never both apply. When flags, environment variables and a named file already set all four values, pcenter does not read the keychain.
 
 | Variable | Meaning |
 | --- | --- |

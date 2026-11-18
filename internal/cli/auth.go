@@ -269,15 +269,17 @@ func holdsAccountValue(payload map[string]string) bool {
 }
 
 func (s *commandState) writeLoginPayload(target string, report config.Report, payload map[string]string) error {
-	if len(payload) == 0 {
-		return nil
-	}
 	if target == storageKeychain {
+		if len(payload) == 0 {
+			return nil
+		}
 		if err := config.SaveKeychain(s.dependencies.Keychain, payload); err != nil {
 			return failureError{fmt.Errorf("store credentials in the keychain: %w; %s", err, noKeychainRemedy)}
 		}
 		return nil
 	}
+	// Saved even when empty, so a file named with --env-file exists afterwards
+	// and later commands that name it do not fail on a missing file.
 	if err := config.Save(report.EnvFile, payload); err != nil {
 		return failureError{err}
 	}

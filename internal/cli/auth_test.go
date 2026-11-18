@@ -1170,3 +1170,21 @@ func TestAuthStatusOfflineShowsAMalformedDefaultFile(t *testing.T) {
 		t.Fatalf("table status should show the file error: %s", tableOut)
 	}
 }
+
+func TestAuthLoginCreatesAMissingNamedFile(t *testing.T) {
+	t.Parallel()
+	server := fullServer(t)
+	absent := filepath.Join(t.TempDir(), "absent.env")
+	_, stderr, exitCode := executeWithKeychain(t, config.NewMemoryKeychain(), fakeEnvironment(server),
+		[]string{"--output", "json", "--env-file", absent, "auth", "login", "--skip-validation"}, cli.BuildInfo{})
+	if exitCode != output.ExitSuccess {
+		t.Fatalf("exit = %d stderr = %q", exitCode, stderr)
+	}
+	contents, err := os.ReadFile(absent)
+	if err != nil {
+		t.Fatalf("named file not created: %v", err)
+	}
+	if strings.Contains(string(contents), "MS_STORE_") {
+		t.Fatalf("environment values must not be written: %s", contents)
+	}
+}
